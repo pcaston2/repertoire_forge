@@ -1,3 +1,4 @@
+import 'package:chess/chess.dart';
 import 'package:repertoire_forge/database.dart';
 
 import 'data_access.dart';
@@ -36,6 +37,16 @@ class DataImport {
     var archives = await dataAccess.archives;
     for (var a in archives) {
       await importGamesInArchive(a.name);
+    }
+  }
+
+  Future<void> parseGame(String gameId) async {
+    var game = await dataAccess.getGame(gameId);
+    var chess = Chess();
+    chess.load_pgn(game.pgn);
+    while (chess.move_number >= 1) {
+      var fen = chess.fen;
+      var existingFen = dataAccess.getPosition(fen, insertIfMissing: true);
     }
   }
 }

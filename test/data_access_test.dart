@@ -44,4 +44,24 @@ void main() {
     expect(archives, hasLength(1));
     expect(archives.single.name, archiveName);
   });
+
+  test ('insert position', () async {
+    //arrange
+    var fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    var sut = DataAccess(database!);
+    //act
+    var pos = (await sut.getPosition(fen, insertIfMissing: true))!;
+    //
+    expect(pos.fen, equals(fen));
+  });
+
+  test ('fail to get if not inserted position', () async {
+    //arrange
+    var fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    var sut = DataAccess(database!);
+    //act
+    var pos = await sut.getPosition(fen, insertIfMissing: false);
+    //
+    expect(pos, equals(null));
+  });
 }

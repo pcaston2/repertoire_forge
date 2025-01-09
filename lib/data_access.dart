@@ -1,3 +1,5 @@
+import 'package:drift/src/runtime/query_builder/query_builder.dart';
+
 import 'database.dart';
 
 class DataAccess {
@@ -30,5 +32,16 @@ class DataAccess {
 
   Future<Game> getGame(String gameId) async {
     return await (_database.select(_database.games)..where((g) => g.uuid.equals(gameId))).getSingle();
+  }
+
+  Future<Position?> getPosition(String fen, {bool insertIfMissing = false}) async {
+    var pos = await (_database.select(_database.positions)..where((p) => p.fen.equals(fen))).getSingleOrNull();
+    if (!insertIfMissing) {
+      return pos;
+    } else {
+      if (pos == null) {
+        return await (_database.into(_database.positions).insertReturning(PositionsCompanion.insert(fen: fen)));
+      }
+    }
   }
 }

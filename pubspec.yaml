@@ -38,6 +38,7 @@ dependencies:
   drift: ^2.23.0
   drift_flutter: ^0.1.0
   http: ^1.2.2
+  chess: ^0.8.1
 
 dev_dependencies:
   drift_dev: ^2.23.0

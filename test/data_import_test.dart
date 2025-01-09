@@ -60,4 +60,13 @@ void main() {
     //assert
     expect(game.uuid,equals(latestGameId));
   });
+
+  test('parse game', () async {
+    //arrange
+    var sut = await DataImport.create(da);
+    await sut.importGamesInArchive(archiveName);
+    //act
+    sut.parseGame(gameId);
+    //assert
+  });
 }

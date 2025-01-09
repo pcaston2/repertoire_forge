@@ -34,7 +34,7 @@ class ChessDotComClient {
     List<Game> games = [];
     var gamesJson = await get(archiveUri);
     for (var g in gamesJson["games"]) {
-      games.add(Game(uuid: g["uuid"], pgn: g["pgn"],archive: archiveUri));
+      games.add(Game(uuid: g["uuid"], pgn: g["pgn"],archive: archiveUri, imported: false));
     }
     return games;
   }
