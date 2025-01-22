@@ -55,7 +55,7 @@ void main() {
     var sut = await DataImport.create(da);
     await sut.importArchives();
     //act
-    await sut.importGames();
+    await sut.importAllGames();
     var game = await da.getGame(latestGameId);
     //assert
     expect(game.uuid,equals(latestGameId));
@@ -64,9 +64,23 @@ void main() {
   test('parse game', () async {
     //arrange
     var sut = await DataImport.create(da);
+    await sut.importArchives();
     await sut.importGamesInArchive(archiveName);
+    var expectedPosition = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3";
     //act
-    sut.parseGame(gameId);
+    await sut.parseGame(gameId);
+    var result = await da.getPosition(expectedPosition);
+    //assert
+    expect(result!.fen, expectedPosition);
+  });
+
+  test('parse by archive', () async {
+    //arrange
+    var sut = await DataImport.create(da);
+    await sut.importArchives();
+    await sut.importAllGames();
+    //act
+    await sut.parseGamesByArchive(archiveName);
     //assert
   });
 }

@@ -1,5 +1,5 @@
 
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' as drift;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:repertoire_forge/data_access.dart';
@@ -9,7 +9,7 @@ void main() {
   AppDatabase? database;
 
   setUp(() {
-    database = AppDatabase(DatabaseConnection(
+    database = AppDatabase(drift.DatabaseConnection(
       NativeDatabase.memory(),
       closeStreamsSynchronously: true,
     ));
@@ -50,9 +50,21 @@ void main() {
     var fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
     var sut = DataAccess(database!);
     //act
-    var pos = (await sut.getPosition(fen, insertIfMissing: true))!;
+    var pos = await sut.getOrAddPosition(fen);
     //
     expect(pos.fen, equals(fen));
+  });
+
+  test ('get existing position', () async {
+    //arrange
+    var fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    var sut = DataAccess(database!);
+    await sut.getOrAddPosition(fen);
+    //act
+    var pos = await sut.getPosition(fen);
+    //assert
+    expect(pos, isNotNull);
+    expect(pos!.fen, equals(fen));
   });
 
   test ('fail to get if not inserted position', () async {
@@ -60,8 +72,22 @@ void main() {
     var fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
     var sut = DataAccess(database!);
     //act
-    var pos = await sut.getPosition(fen, insertIfMissing: false);
+    var pos = await sut.getPosition(fen);
     //
     expect(pos, equals(null));
+  });
+
+  test('insert move', () async {
+    //arrange
+    var sut = DataAccess(database!);
+    var fromFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    var toFen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3";
+    var move = "e4";
+    await sut.getOrAddPosition(fromFen);
+    await sut.getOrAddPosition(toFen);
+    //act
+    var result = await sut.addMove(fromFen, move, toFen);
+    //assert
+    expect(result, isNotNull);
   });
 }

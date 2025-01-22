@@ -34,14 +34,32 @@ class DataAccess {
     return await (_database.select(_database.games)..where((g) => g.uuid.equals(gameId))).getSingle();
   }
 
-  Future<Position?> getPosition(String fen, {bool insertIfMissing = false}) async {
-    var pos = await (_database.select(_database.positions)..where((p) => p.fen.equals(fen))).getSingleOrNull();
-    if (!insertIfMissing) {
-      return pos;
+  Future<Position> getOrAddPosition(String fen) async {
+    var pos = await getPosition(fen);
+    if (pos == null) {
+      return await (_database.into(_database.positions).insertReturning(PositionsCompanion.insert(fen: fen)));
     } else {
-      if (pos == null) {
-        return await (_database.into(_database.positions).insertReturning(PositionsCompanion.insert(fen: fen)));
-      }
+      return pos;
     }
+  }
+
+  Future<Position?> getPosition(String fen) async {
+    return await (_database.select(_database.positions)..where((p) => p.fen.equals(fen))).getSingleOrNull();
+  }
+
+  Future<GamePosition> addGamePosition(Game game, Position position, int moveNumber) async {
+    return await(_database.into(_database.gamePositions).insertReturning(GamePositionsCompanion.insert(game: game.uuid, position: position.fen, moveNumber: moveNumber)));
+  }
+
+  Future<List<Game>> getGames() async {
+    return await _database.select(_database.games).get();
+  }
+
+  Future<List<Game>> getGamesByArchive(String archiveName) async {
+    return await (_database.select(_database.games)..where((g) => g.archive.equals(archiveName))).get();
+  }
+
+  Future<Move> addMove(String fromFen, String move, String toFen) async {
+    return await (_database.into(_database.moves).insertReturning(MovesCompanion.insert(fromFen: fromFen, move: move, toFen: toFen)));
   }
 }

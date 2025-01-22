@@ -43,19 +43,17 @@ class Positions extends Table {
 class GamePositions extends Table {
   late final game = text().references(Games, #uuid)();
   late final position = text().references(Positions, #fen)();
-  IntColumn get moveCount => integer()();
+  IntColumn get moveNumber => integer()();
 }
 
-//class Moves extends Table {
-  //late final fromFen = text().references(Positions, #fen);
-  //TextColumn get move => text()();
-  //late final toFen = text().references(Positions, #fen);
+class Moves extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  late final fromFen = text().references(Positions, #fen)();
+  TextColumn get move => text()();
+  late final toFen = text().references(Positions, #fen)();
+}
 
-  //@override
-  //Set<Column<Object>> get primaryKey => {fromFen, move, toFen};
-//}
-
-@DriftDatabase(tables: [Games, Archives, Users, Positions, GamePositions])
+@DriftDatabase(tables: [Games, Archives, Users, Positions, GamePositions, Moves])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
