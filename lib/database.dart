@@ -1,7 +1,10 @@
 
+import 'dart:io';
+
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 part 'database.g.dart';
 
 
@@ -10,24 +13,23 @@ class Archives extends Table {
   TextColumn get name => text()();
   TextColumn get hash => text()();
   BoolColumn get imported => boolean()();
-  late final user = text().references(Users, #username)();
-
+  IntColumn get user => integer().references(Users, #id)();
   @override
   Set<Column<Object>> get primaryKey => {name};
 }
 
 class Users extends Table {
+  IntColumn get id => integer().autoIncrement()();
   TextColumn get username => text()();
-
-  @override
-  Set<Column<Object>> get primaryKey => {username};
+  IntColumn get repertoire => integer().nullable().references(Repertoires, #id)();
 }
 
 class Games extends Table {
   TextColumn get uuid => text()();
   TextColumn get pgn => text()();
   BoolColumn get imported => boolean()();
-  late final archive = text().references(Archives, #name)();
+  RealColumn get score => real()();
+  TextColumn get archive => text().references(Archives, #name)();
 
   @override
   Set<Column<Object>> get primaryKey => {uuid};
@@ -41,24 +43,76 @@ class Positions extends Table {
 }
 
 class GamePositions extends Table {
-  late final game = text().references(Games, #uuid)();
-  late final position = text().references(Positions, #fen)();
+  TextColumn get game => text().references(Games, #uuid)();
+  TextColumn get position => text().references(Positions, #fen)();
   IntColumn get moveNumber => integer()();
+  BoolColumn get myMove => boolean()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {position, game, moveNumber};
 }
 
 class Moves extends Table {
-  IntColumn get id => integer().autoIncrement()();
-  late final fromFen = text().references(Positions, #fen)();
+  @ReferenceName("fromFens")
+  TextColumn get fromFen => text().references(Positions, #fen)();
   TextColumn get move => text()();
-  late final toFen = text().references(Positions, #fen)();
-}
-
-@DriftDatabase(tables: [Games, Archives, Users, Positions, GamePositions, Moves])
-class AppDatabase extends _$AppDatabase {
-  AppDatabase(super.e);
+  @ReferenceName("toFens")
+  TextColumn get toFen => text().references(Positions, #fen)();
 
   @override
+  Set<Column<Object>> get primaryKey => {fromFen, move};
+}
+
+class GameMoves extends Table {
+  TextColumn get fromFen => text()();
+  TextColumn get move => text()();
+  TextColumn get game => text().references(Games, #uuid)();
+  BoolColumn get myMove => boolean()();
+  IntColumn get moveNumber => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {fromFen, move, game, moveNumber};
+
+  @override
+  List<String> get customConstraints => [
+    'FOREIGN KEY (from_fen, move) REFERENCES moves (from_fen, move)',
+  ];
+}
+
+class RepertoireMoves extends Table {
+  TextColumn get fromFen => text()();
+  TextColumn get move => text()();
+  IntColumn get repertoire => integer().references(Repertoires, #id)();
+
+  @override
+  Set<Column<Object>> get primaryKey => {fromFen, move};
+
+  @override
+  List<String> get customConstraints => [
+    'FOREIGN KEY (from_fen, move) REFERENCES moves (from_fen, move)',
+  ];
+}
+
+class Repertoires extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+}
+
+@DriftDatabase(tables: [Games, Archives, Users, Repertoires, Positions, GamePositions, Moves, GameMoves, RepertoireMoves])
+class AppDatabase extends _$AppDatabase {
+  AppDatabase() : super(_openConnection());
+  AppDatabase.configurable(super.e);
+  @override
   int get schemaVersion => 1;
+
+  static LazyDatabase _openConnection() {
+    return LazyDatabase(() async {
+      final dbFolder = await getApplicationDocumentsDirectory();
+      final file = File(p.join(dbFolder.path, 'repertoire_forge.sqlite'));
+
+      return NativeDatabase.createInBackground(file);
+    });
+  }
 
   @override
   MigrationStrategy get migration {

@@ -1,32 +1,39 @@
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:repertoire_forge/chess_dot_com_client.dart';
 import 'package:repertoire_forge/data_access.dart';
 import 'package:repertoire_forge/data_import.dart';
 import 'package:repertoire_forge/database.dart';
 
-void main() {
+void main() async {
   late DataAccess da;
-  late ChessDotComClient client;
   late AppDatabase database;
   String username = 'pcaston2';
   String archiveName = 'https://api.chess.com/pub/player/pcaston2/games/2016/04';
   String gameId = '470cf19e-fddc-11e5-8082-00000001000b';
   String latestGameId = '04719517-c994-11ef-8893-df8f3801000f';
-  setUp(() {
-    database = AppDatabase(DatabaseConnection(
+  setUp(() async {
+    database = AppDatabase.configurable((DatabaseConnection(
       NativeDatabase.memory(),
       closeStreamsSynchronously: true,
-    ));
+    )));
     da = DataAccess(database);
-    da.addUser(username);
+    await da.setUser(username);
   });
 
   tearDown(() async {
     await database.close();
   });
 
+
+  test('import archives multiple times', () async {
+    //arrange
+    var sut = await DataImport.create(da);
+    //act
+    await sut.importArchives();
+    await sut.importArchives();
+    //assert
+  });
 
   test('import archives', () async {
     //arrange
@@ -66,12 +73,24 @@ void main() {
     var sut = await DataImport.create(da);
     await sut.importArchives();
     await sut.importGamesInArchive(archiveName);
-    var expectedPosition = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3";
+    var expectedPosition = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq -";
+    //act
+    var game = await sut.parseGame(gameId);
+    var importedPosition = await da.getPosition(expectedPosition);
+    //assert
+    expect(importedPosition!.fen, expectedPosition);
+
+  });
+
+  test('parse game twice', () async {
+    //arrange
+    var sut = await DataImport.create(da);
+    await sut.importArchives();
+    await sut.importGamesInArchive(archiveName);
     //act
     await sut.parseGame(gameId);
-    var result = await da.getPosition(expectedPosition);
+    await sut.parseGame(gameId);
     //assert
-    expect(result!.fen, expectedPosition);
   });
 
   test('parse by archive', () async {
@@ -83,4 +102,14 @@ void main() {
     await sut.parseGamesByArchive(archiveName);
     //assert
   });
+
+  test('parse all games', () async {
+      //arrange
+      var sut = await DataImport.create(da);
+      await sut.importArchives();
+      await sut.importAllGames();
+      //act
+      await sut.parseAllGames();
+      //assert
+    }, skip: true);
 }
