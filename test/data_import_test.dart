@@ -75,7 +75,7 @@ void main() async {
     await sut.importGamesInArchive(archiveName);
     var expectedPosition = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq -";
     //act
-    var game = await sut.parseGame(gameId);
+    await sut.parseGame(gameId);
     var importedPosition = await da.getPosition(expectedPosition);
     //assert
     expect(importedPosition!.fen, expectedPosition);

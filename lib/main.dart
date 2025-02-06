@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:chessground/chessground.dart';
 import 'package:fast_immutable_collections/fast_immutable_collections.dart';

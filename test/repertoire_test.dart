@@ -74,7 +74,7 @@ void main() {
     //arrange
     var expectedPgn = "1. e4 ( 1. d4 ) 1... e5 *\n";
     await da.getOrAddArchive("1");
-    var game = await da.addGame(Game(uuid: "gameId", pgn: "", imported: true, score: 0.0, archive: "1"));
+    var game = await da.addGame(const Game(uuid: "gameId", pgn: "", imported: true, score: 0.0, archive: "1"));
     var commonMove = await da.getOrAddMove(initialPosition, move, secondPosition);
     await da.addGameMove(game, commonMove, 1, true);
     var sut = await RepertoireExplorer.create(da);
@@ -92,7 +92,12 @@ void main() {
     var importedPgn = "1. e4 ( 1. d4 ) 1... e5 *\n";
     var sut = await RepertoireExplorer.create(da);
     //act
-    sut.importRepertoire(importedPgn);
+    await sut.importRepertoire(importedPgn);
+    var moves = await sut.getMoves(initialPosition);
+    var secondMove = await sut.getMoves(secondPosition);
     //assert
+    expect(moves.any((m) => m.move == "e4"), true);
+    expect(moves.any((m) => m.move == "d4"), true);
+    expect(secondMove.any((m) => m.move =="e5"), true);
   });
 }

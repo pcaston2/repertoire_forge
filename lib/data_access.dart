@@ -1,7 +1,5 @@
 import 'package:dartchess/dartchess.dart' as chess;
 import 'package:drift/drift.dart';
-import 'package:drift/src/runtime/query_builder/query_builder.dart';
-import 'package:collection/collection.dart';
 
 
 import 'chess_helper.dart';
@@ -187,9 +185,9 @@ class DataAccess {
     await transaction(() async {
       var pgnGame = chess.PgnGame.parsePgn(pgn);
       chess.Position startingPosition = chess.PgnGame.startingPosition(pgnGame.headers);
-      getOrAddPosition(ChessHelper.stripMoveClockInfoFromFEN(startingPosition.fen));
+      await getOrAddPosition(ChessHelper.stripMoveClockInfoFromFEN(startingPosition.fen));
       for (var m in pgnGame.moves.children) {
-        importChildren(repertoire, m, startingPosition);
+        await importChildren(repertoire, m, startingPosition);
       }
 
         // var move = chessPosition.parseSan(moveNode.san)!;
