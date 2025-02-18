@@ -1,13 +1,18 @@
 import 'dart:async';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:chessground/chessground.dart';
 import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'package:dartchess/dartchess.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:repertoire_forge/data_import.dart';
 import 'package:repertoire_forge/database.dart' as db;
 import 'package:repertoire_forge/repertoire_explorer.dart';
 import 'package:repertoire_forge/chess_helper.dart';
 import 'data_access.dart';
+import 'dart:io' as io;
+import 'package:path/path.dart' as path;
+
 
 late RepertoireExplorer explorer;
 late DataAccess dataAccess;
@@ -64,20 +69,21 @@ class _HomePageState extends State<HomePage> {
   String fen = kInitialBoardFEN;
   NormalMove? lastMove;
   NormalMove? promotionMove;
-  NormalMove? premove;
   ValidMoves validMoves = IMap(const {});
   Side sideToMove = Side.white;
+  bool get isWhite => sideToMove == Side.white;
   PieceSet pieceSet = PieceSet.gioco;
   PieceShiftMethod pieceShiftMethod = PieceShiftMethod.either;
   DragTargetKind dragTargetKind = DragTargetKind.circle;
   bool drawMode = true;
   bool pieceAnimation = true;
   bool dragMagnify = true;
-  Position<Chess>? lastPos;
+  List<ChessMoveHistoryEntry> history = [];
   ISet<Shape> shapes = ISet();
   bool showBorder = false;
   bool addToRepertoire = false;
   List<db.RepertoireMove> repertoireMoves = [];
+  FToast fToast = FToast();
 
   @override
   Widget build(BuildContext context) {
@@ -89,13 +95,36 @@ class _HomePageState extends State<HomePage> {
         mainAxisSize: MainAxisSize.max,
         children: [
           ElevatedButton(
-            child: const Text("remove"),
+          child: const Text("Import PGN"),
+          onPressed: () async {
+            FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.custom, allowedExtensions: ['pgn']);
+            if (result != null) {
+              List<io.File> files = result.paths.map((p) => io.File(p!)).toList();
+              for (var file in files) {
+                _showToast("Importing from ${path.basename(file.path)}...", icon: Icons.hourglass_bottom, color: Colors.blueAccent);
+                var pgn = await file.readAsString();
+                await explorer.importRepertoire(pgn);
+                _showToast("Import from ${path.basename(file.path)} successful!", icon: Icons.check);
+              }
+            }
+          },
+        ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            child: const Text("Remove"),
             onPressed: () async {
-              print("remove");
+              if (history.isNotEmpty) {
+                var last = history.last;
+                var lastPosition = last.position;
+                var move = lastPosition.makeSan(last.move);
+                await explorer.removeMove(ChessHelper.stripMoveClockInfoFromFEN(lastPosition.fen), move.$2, isWhite: isWhite);
+                await undo();
+              }
             },
           ),
+          const SizedBox(width: 8),
           ElevatedButton(
-            child: Text((addToRepertoire ? "tracking" : "not tracking")),
+            child: Text((addToRepertoire ? "Tracking" : "Not tracking")),
             onPressed: () async {
               setState(() {
                 addToRepertoire = !addToRepertoire;
@@ -109,13 +138,14 @@ class _HomePageState extends State<HomePage> {
         mainAxisSize: MainAxisSize.max,
         children: [
           ElevatedButton(
-            child: const Text("Import"),
+            child: const Text("Import from Chess.com"),
             onPressed: () async {
+              _showToast("Importing from Chess.com...", icon: Icons.hourglass_full, color: Colors.blueAccent);
               var importer = await DataImport.create(dataAccess);
               await importer.importArchives();
               await importer.importAllGames();
               await importer.parseAllGames();
-              print("imported");
+              _showToast("Import from Chess.com successful!", icon: Icons.check);
             },
           ),
           const SizedBox(width: 8),
@@ -136,9 +166,9 @@ class _HomePageState extends State<HomePage> {
                 ));
               }
               setState(() {
-                lastPos = null;
                 lastMove = null;
                 fen = position.fen;
+                history = [];
                 sideToMove = Side.white;
                 validMoves = makeLegalMoves(position);
                 promotionMove = null;
@@ -257,14 +287,11 @@ class _HomePageState extends State<HomePage> {
       ),
         Center(
             child: IconButton(
-                onPressed: lastPos != null
-                    ? () => setState(() {
-                  position = lastPos!;
-                  fen = position.fen;
-                  validMoves = makeLegalMoves(position);
-                  lastPos = null;
-                })
-                    : null,
+                onPressed: history.length > 1
+                    ? ()  async {
+                        await undo();
+                      }
+                      : null,
                 icon: const Icon(Icons.chevron_left_sharp))),
     ];
 
@@ -328,6 +355,22 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> undo() async {
+    if (history.isNotEmpty) {
+      position = history.last.position;
+    } else {
+      position = Chess.initial;
+    }
+    var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn);
+    var initShapes = makeMoveArrows(moveStats, position);
+    setState(() {
+            fen = position.fen;
+            validMoves = makeLegalMoves(position);
+            history.removeLast();
+            shapes = initShapes;
+          });
+  }
+
   void _onCompleteShape(Shape shape) {
     if (shapes.any((element) => element == shape)) {
       setState(() {
@@ -381,13 +424,17 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void initState() {
-    validMoves = makeLegalMoves(position);
-
-    explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn).then((List<MoveStat> moveStats) {
-      var initShapes = makeMoveArrows(moveStats, position);
-        shapes = initShapes;
-      });
     super.initState();
+
+    validMoves = makeLegalMoves(position);
+    explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn).
+    then((List<MoveStat> moveStats) {
+      var initShapes = makeMoveArrows(moveStats, position);
+        setState(() {
+          shapes = initShapes;
+        });
+      });
+    fToast.init(context);
   }
 
   void _onPromotionSelection(Role? role) {
@@ -419,10 +466,10 @@ class _HomePageState extends State<HomePage> {
       var move = position.parseSan(m.move);
       var squares = move!.squares.toList();
       newShapes = newShapes.add(Arrow(
-        color: (m.repo ? Colors.orangeAccent : Colors.lightGreen).withAlpha(128+(64*m.score).round()),
+        color: (m.repo ? Colors.lightBlueAccent : Colors.orangeAccent).withAlpha(128+(64*m.score).round()),
         orig: squares.first,
         dest: squares.last,
-        scale: 0.2 + 0.8 * (m.count / max),
+        scale: 0.2 + 0.8 * (max == 0 ? 0 : (m.count / max)),
       ));
     }
     return newShapes;
@@ -430,13 +477,17 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _playMove(NormalMove move, {bool? isDrop, bool? isPremove}) async {
     var sanMove = position.makeSan(move).$2;
-    lastPos = position;
+    history.add(ChessMoveHistoryEntry(position, move));
     if (isPromotionPawnMove(move)) {
       setState(() {
         promotionMove = move;
       });
     } else if (position.isLegal(move)) {
-      await explorer.addMove(ChessHelper.stripMoveClockInfoFromFEN(lastPos!.fen), sanMove, ChessHelper.stripMoveClockInfoFromFEN(position.fen));
+      if (addToRepertoire) {
+        await explorer.addMove(
+            ChessHelper.stripMoveClockInfoFromFEN(history.last.position.fen), sanMove,
+            ChessHelper.stripMoveClockInfoFromFEN(position.fen));
+      }
       var newPosition = position.playUnchecked(move);
       var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(newPosition.fen),orientation == newPosition.turn);
       var newShapes = makeMoveArrows(moveStats, newPosition);
@@ -457,4 +508,40 @@ class _HomePageState extends State<HomePage> {
         ((move.to.rank == Rank.first && position.turn == Side.black) ||
             (move.to.rank == Rank.eighth && position.turn == Side.white));
   }
+
+
+  _showToast(String message, {IconData icon = Icons.info, Color color = Colors.greenAccent}) {
+    Widget toast = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(25.0),
+        color: color,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon),
+          const SizedBox(
+            width: 12.0,
+          ),
+          Text(message),
+        ],
+      ),
+    );
+
+
+    fToast.showToast(
+      child: toast,
+      gravity: ToastGravity.BOTTOM,
+      toastDuration: const Duration(seconds: 2),
+    );
+  }
+
+}
+
+class ChessMoveHistoryEntry {
+  late Position<Chess> position;
+  late NormalMove move;
+
+  ChessMoveHistoryEntry(this.position, this.move);
 }

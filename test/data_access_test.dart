@@ -106,7 +106,7 @@ void main() {
     await di.parseGamesByArchive(archiveName);
     await explorer.addMove(initialPosition, initialMove, nextPosition);
     await explorer.addMove(initialPosition, alternateMove, alternatePosition);
-    var repertoireId = (await explorer.repertoire).id;
+    var repertoireId = (await explorer.getRepertoire())!.id;
     //act
     var result = await sut.getMoveStats(initialPosition, repertoireId, true);
     //assert

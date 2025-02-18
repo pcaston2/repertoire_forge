@@ -74,8 +74,16 @@ class DataAccess {
     return await _database.select(_database.games).get();
   }
 
+  Future<List<Game>> getGamesToImport() async {
+    return await (_database.select(_database.games)..where((g) => g.imported.not())).get();
+  }
+
   Future<List<Game>> getGamesByArchive(String archiveName) async {
     return await (_database.select(_database.games)..where((g) => g.archive.equals(archiveName))).get();
+  }
+
+  Future<List<Game>> getGamesByArchiveToImport(String archiveName) async {
+    return await (_database.select(_database.games)..where((g) => Expression.and([g.archive.equals(archiveName),g.imported.not()]))).get();
   }
 
   Future<Move?> getMove(String fromFen, String move) async {
@@ -98,8 +106,8 @@ class DataAccess {
     return await (_database.into(_database.gameMoves).insertReturning(GameMovesCompanion.insert(fromFen: move.fromFen, move: move.move, game: game.uuid, moveNumber: moveNumber, myMove: myMove)));
   }
 
-  Future<Repertoire?> getRepertoire() async {
-    var repertoire = (await user).repertoire;
+  Future<Repertoire?> getRepertoire({bool isWhite = true}) async {
+    var repertoire = (isWhite? (await user).white_repertoire : (await user).black_repertoire);
     if (repertoire == null) {
       return null;
     } else {
@@ -107,22 +115,31 @@ class DataAccess {
     }
   }
 
-  Future<Repertoire> createRepertoire(String repertoireName) async {
+  Future<Repertoire> createRepertoire(bool isWhite, String repertoireName) async {
     return await(_database.into(_database.repertoires).insertReturning(RepertoiresCompanion.insert(name: repertoireName)));
   }
 
-  setRepertoire(int repertoireId) async {
+  setRepertoire(int repertoireId, {bool isWhite = true}) async {
     var currentUser = await user;
-    await _database.update(_database.users).write(currentUser.copyWith(repertoire: Value(repertoireId)));
+    await _database.update(_database.users).write((
+        isWhite ?
+        currentUser.copyWith(white_repertoire: Value(repertoireId)) :
+        currentUser.copyWith(black_repertoire: Value(repertoireId))
+    ));
   }
 
-  Future<RepertoireMove> getOrAddRepertoireMove(String fromFen, String move, int repertoire) async {
-    var repertoire = (await user).repertoire!;
-    var repertoireMove = await (_database.select(_database.repertoireMoves)..where((m) => Expression.and([m.fromFen.equals(fromFen),m.move.equals(move), m.repertoire.equals(repertoire)]))).getSingleOrNull();
+  Future<RepertoireMove?> getRepertoireMove(String fromFen, String move, int repertoire, {bool isWhite = true}) async {
+    var repertoire = await getOrAddRepertoire(isWhite: isWhite);
+    return await (_database.select(_database.repertoireMoves)..where((m) => Expression.and([m.fromFen.equals(fromFen),m.move.equals(move), m.repertoire.equals(repertoire!.id)]))).getSingleOrNull();
+  }
+
+  Future<RepertoireMove> getOrAddRepertoireMove(String fromFen, String move, int repertoire, {bool isWhite = true}) async {
+    var repertoire = await getOrAddRepertoire(isWhite: isWhite);
+    var repertoireMove = await getRepertoireMove(fromFen, move, repertoire!.id);
     if (repertoireMove != null) {
       return repertoireMove;
     } else {
-      return await _database.into(_database.repertoireMoves).insertReturning(RepertoireMovesCompanion.insert(fromFen: fromFen, move: move, repertoire: repertoire));
+      return await _database.into(_database.repertoireMoves).insertReturning(RepertoireMovesCompanion.insert(fromFen: fromFen, move: move, repertoire: repertoire.id));
     }
   }
 
@@ -142,6 +159,12 @@ class DataAccess {
   Future<void> setGameImported(String gameId) async {
     var game = await getGame(gameId);
     await _database.update(_database.games).replace(game.copyWith(imported: true));
+  }
+
+
+  Future<void> setIsWhite(String gameId, bool isWhite) async {
+    var game = await getGame(gameId);
+    await _database.update(_database.games).replace(game.copyWith(isWhite: Value(isWhite)));
   }
 
   Future<void> setGameScore(String gameId, double score) async {
@@ -176,7 +199,7 @@ class DataAccess {
   Future<String> exportRepertoire(int repertoire, bool myMove) async {
     var root = chess.PgnNode();
     var initialFen = ChessHelper.stripMoveClockInfoFromFEN(chess.Chess.initial.fen);
-    root.children.addAll(await getChildren(repertoire, initialFen, myMove));
+    root.children.addAll(await getRepositoryChildren(repertoire, initialFen, myMove));
     var game = chess.PgnGame(headers: <String, String>{}, moves: root, comments: []);
     return game.makePgn();
   }
@@ -184,43 +207,121 @@ class DataAccess {
   Future<void> importRepertoire(int repertoire, String pgn) async {
     await transaction(() async {
       var pgnGame = chess.PgnGame.parsePgn(pgn);
-      chess.Position startingPosition = chess.PgnGame.startingPosition(pgnGame.headers);
-      await getOrAddPosition(ChessHelper.stripMoveClockInfoFromFEN(startingPosition.fen));
+      chess.Position startingPosition = chess.PgnGame.startingPosition(
+          pgnGame.headers);
+      await getOrAddPosition(
+          ChessHelper.stripMoveClockInfoFromFEN(startingPosition.fen));
       for (var m in pgnGame.moves.children) {
         await importChildren(repertoire, m, startingPosition);
       }
-
-        // var move = chessPosition.parseSan(moveNode.san)!;
-        // chessPosition = chessPosition.play(move);
-        // var fen = chessPosition.fen;
-        // var position = await dataAccess.getOrAddPosition(ChessHelper.stripMoveClockInfoFromFEN(fen));
-        // await dataAccess.addGamePosition(game, position, moveCount, !myMove);
-        // var moveEntry = await dataAccess.getOrAddMove(previousPosition.fen, moveNode.san, position.fen);
-        // await dataAccess.addGameMove(game, moveEntry, moveCount, myMove);
-        // previousPosition = position;
     });
   }
 
   Future<void> importChildren(int repertoire, chess.PgnChildNode move, chess.Position position) async {
     var currentMove = position.parseSan(move.data.san);
+    if (currentMove == null) {
+      print(move.data.san);
+    }
     var nextPosition = position.play(currentMove!);
     await getOrAddMove(ChessHelper.stripMoveClockInfoFromFEN(position.fen), move.data.san, ChessHelper.stripMoveClockInfoFromFEN(nextPosition.fen));
     await getOrAddRepertoireMove(ChessHelper.stripMoveClockInfoFromFEN(position.fen), move.data.san, repertoire);
     for (var m in move.children) {
-      importChildren(repertoire, m, nextPosition);
+      await importChildren(repertoire, m, nextPosition);
     }
   }
 
-  Future<List<chess.PgnChildNode>> getChildren(int repertoire, String fen, bool myMove) async {
+  Future<List<chess.PgnChildNode>> getRepositoryChildren(int repertoire, String fen, bool myMove) async {
     var moveStats = (await getMoveStats(fen, repertoire, myMove)).where((m) => m.repo).toList()..sort((a,b) => b.count.compareTo(a.count));
     var children = <chess.PgnChildNode>[];
     for (var m in moveStats) {
       var child = chess.PgnChildNode(chess.PgnNodeData(san: m.move));
       var move = await getMove(fen, m.move);
-      child.children.addAll(await getChildren(repertoire, move!.toFen, !myMove));
+      child.children.addAll(await getRepositoryChildren(repertoire, move!.toFen, !myMove));
       children.add(child);
     }
     return children;
+  }
+
+  removeRepertoireMove(int repertoire, String fen, String move) async {
+    var repertoireMove = await getRepertoireMove(fen, move, repertoire);
+    if (repertoireMove != null) {
+      await _database.delete(_database.repertoireMoves).delete(repertoireMove);
+    }
+  }
+
+  Future<GameRepertoireComparison?> generateGameComparison(int repertoire, String game) async {
+    var gameMoves = await (_database
+        .select(_database.gameMoves)
+      ..where((m) => m.game.equals(game))
+      ..orderBy([(m) => OrderingTerm(expression: m.moveNumber)])).get();
+    if (gameMoves.isEmpty) {
+      return null;
+    }
+    for (var g in gameMoves) {
+      var potentialMoves = await getRepertoireMoves(g.fromFen, repertoire);
+      if (potentialMoves.isEmpty) {
+        return GameRepertoireComparison(
+            game: game,
+            fromFen: g.fromFen,
+            move: g.move,
+            deviated: false,
+            moveNumber: g.moveNumber,
+            myMove: g.myMove,
+            reviewed: false);
+      } else {
+        if (potentialMoves.any((r) => r.move == (g.move))) {
+          continue;
+        } else {
+          return GameRepertoireComparison(game: game,
+              fromFen: g.fromFen,
+              move: g.move,
+              deviated: true,
+              moveNumber: g.moveNumber,
+              myMove: g.myMove,
+              reviewed: false);
+        }
+      }
+    }
+    var last = gameMoves.last;
+    return GameRepertoireComparison(game: game,
+        fromFen: last.fromFen,
+        move: last.move,
+        deviated: false,
+        moveNumber: last.moveNumber,
+        myMove: last.myMove,
+        reviewed: false);
+  }
+
+  Future<GameRepertoireComparison?> getOrAddGameComparison(int repertoire, String game) async {
+    var comparison = await getGameComparison(game);
+    if (comparison != null) {
+      return comparison;
+    } else {
+      var comparison = await generateGameComparison(repertoire, game);
+      if (comparison != null) {
+        await addOrUpdateGameComparison(comparison);
+      }
+      return comparison;
+    }
+  }
+
+  Future<void> addOrUpdateGameComparison(GameRepertoireComparison comparison) async {
+    await _database.into(_database.gameRepertoireComparisons).insertOnConflictUpdate(comparison);
+  }
+
+  Future<GameRepertoireComparison?> getGameComparison(String game) async {
+    return await (_database.select(_database.gameRepertoireComparisons)..where((c) => c.game.equals(game))).getSingleOrNull();
+  }
+
+  Future<Repertoire> getOrAddRepertoire({bool isWhite = true}) async {
+    var repertoire = await getRepertoire(isWhite: isWhite);
+    repertoire ??= await createRepertoire(isWhite, (isWhite ? "White" : "Black"));
+    setRepertoire(repertoire.id, isWhite: isWhite);
+    return repertoire;
+  }
+
+  Future<List<Repertoire>> getRepertoires() async {
+    return await (_database.select(_database.repertoires)).get();
   }
 }
 

@@ -11,44 +11,56 @@ class RepertoireExplorer {
     return RepertoireExplorer._create(dataAccess: dataAccess);
   }
 
-  Future<Repertoire> get repertoire async {
-    var repertoire = await dataAccess.getRepertoire();
-    repertoire ??= await createRepertoire("Default");
-    await setRepertoire(repertoire.id);
-    return repertoire;
+  Future<Repertoire?> getRepertoire({bool isWhite = true}) async {
+    return await dataAccess.getRepertoire(isWhite: isWhite);
   }
 
-  Future<Repertoire> createRepertoire(String repertoireName) async {
-    return await dataAccess.createRepertoire(repertoireName);
+  Future<Repertoire> getOrCreateRepertoire({bool isWhite = true}) async {
+    return await dataAccess.getOrAddRepertoire(isWhite: isWhite);
+  }
+
+  Future<Repertoire> createRepertoire(String repertoireName, {bool isWhite = true}) async {
+    return await dataAccess.createRepertoire(isWhite, repertoireName);
   }
 
   setRepertoire(int repertoireId) async {
     await dataAccess.setRepertoire(repertoireId);
   }
 
-  Future<RepertoireMove> addMove(String fromFen, String move, String toFen) async {
-    var currentRepertoire = await repertoire;
+  Future<RepertoireMove> addMove(String fromFen, String move, String toFen, {bool isWhite = true}) async {
+    var currentRepertoire = await getOrCreateRepertoire(isWhite: isWhite);
     await dataAccess.getOrAddMove(fromFen, move, toFen);
     return await dataAccess.getOrAddRepertoireMove(fromFen, move, currentRepertoire.id);
   }
 
-  Future<List<MoveStat>> getMoveStats(String fen, bool myMove) async {
-    var currentRepertoire = await repertoire;
+  Future<List<MoveStat>> getMoveStats(String fen, bool myMove,  {bool isWhite = true}) async {
+    var currentRepertoire = await getOrCreateRepertoire(isWhite: isWhite);
     return await dataAccess.getMoveStats(fen, currentRepertoire.id, myMove);
   }
 
-  Future<List<RepertoireMove>> getMoves(String fromFen) async {
-    var currentRepertoire = await repertoire;
+  Future<List<RepertoireMove>> getMoves(String fromFen, {bool isWhite = true}) async {
+    var currentRepertoire = await getOrCreateRepertoire(isWhite: isWhite);
     return await dataAccess.getRepertoireMoves(fromFen, currentRepertoire.id);
   }
 
-  Future<String> exportRepertoire(bool myMove) async {
-    var currentRepertoire = await repertoire;
+  Future<String> exportRepertoire(bool myMove, {bool isWhite = true}) async {
+    var currentRepertoire = await getOrCreateRepertoire(isWhite: isWhite);
     return await dataAccess.exportRepertoire(currentRepertoire.id, myMove);
   }
 
-  Future<void> importRepertoire(String pgn) async {
-    var currentRepertoire = await repertoire;
+  Future<void> importRepertoire(String pgn, {bool isWhite = true}) async {
+    var currentRepertoire = await getOrCreateRepertoire(isWhite: isWhite);
     return await dataAccess.importRepertoire(currentRepertoire.id, pgn);
+  }
+
+  Future<void> removeMove(String fen, String move, {bool isWhite = true}) async {
+    var currentRepertoire = await getOrCreateRepertoire(isWhite: isWhite);
+    return await dataAccess.removeRepertoireMove(currentRepertoire.id, fen, move);
+  }
+
+  Future<GameRepertoireComparison?>getOrAddGameComparison(String game) async {
+    var gameEntry = await dataAccess.getGame(game);
+    var currentRepository = await getOrCreateRepertoire(isWhite: gameEntry.isWhite!);
+    return await dataAccess.getOrAddGameComparison(currentRepository.id, game);
   }
 }

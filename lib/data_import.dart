@@ -45,10 +45,10 @@ class DataImport {
     }
   }
 
-  Future<void> parseGame(String gameId) async {
+  Future<bool> parseGame(String gameId) async {
     var game = await dataAccess.getGame(gameId);
     if (game.imported) {
-      return;
+      return false;
     }
     await dataAccess.transaction(() async {
       var game = await dataAccess.getGame(gameId);
@@ -63,7 +63,7 @@ class DataImport {
         isWhite = false;
       }
       if (isWhite == null) {
-        return;
+        return false;
       }
       var result = pgnGame.headers["Result"];
       var score = 0.0;
@@ -74,7 +74,7 @@ class DataImport {
       } else if (result == "1/2-1/2") {
         score = 0.5;
       } else {
-        return;
+        return false;
       }
       Position chessPosition = PgnGame.startingPosition(pgnGame.headers);
       var initialFen = chessPosition.fen;
@@ -96,22 +96,34 @@ class DataImport {
         moveCount++;
         previousPosition = position;
       }
+      await dataAccess.setIsWhite(gameId, isWhite);
       await dataAccess.setGameScore(gameId, score);
       await dataAccess.setGameImported(gameId);
     });
+    return true;
   }
 
-  Future<void> parseAllGames() async {
-    var games = await dataAccess.getGames();
+  Future<int> parseAllGames() async {
+    var games = await dataAccess.getGamesToImport();
+    var parseCount = 0;
     for(var game in games) {
-      await parseGame(game.uuid);
+      var parsed = await parseGame(game.uuid);
+      if (parsed) {
+        parseCount++;
+      }
     }
+    return parseCount;
   }
 
-  Future<void> parseGamesByArchive(String archiveName) async {
-    var games = await dataAccess.getGamesByArchive(archiveName);
+  Future<int> parseGamesByArchive(String archiveName) async {
+    var games = await dataAccess.getGamesByArchiveToImport(archiveName);
+    var parseCount = 0;
     for (var game in games) {
-      await parseGame(game.uuid);
+      var parsed = await parseGame(game.uuid);
+      if (parsed) {
+        parseCount++;
+      }
     }
+    return parseCount;
   }
 }

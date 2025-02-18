@@ -21,15 +21,20 @@ class Archives extends Table {
 class Users extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get username => text()();
-  IntColumn get repertoire => integer().nullable().references(Repertoires, #id)();
+  @ReferenceName("white")
+  IntColumn get white_repertoire => integer().nullable().references(Repertoires, #id)();
+  @ReferenceName("black")
+  IntColumn get black_repertoire => integer().nullable().references(Repertoires, #id)();
 }
 
 class Games extends Table {
   TextColumn get uuid => text()();
   TextColumn get pgn => text()();
   BoolColumn get imported => boolean()();
+  BoolColumn get reviewed => boolean()();
   RealColumn get score => real()();
   TextColumn get archive => text().references(Archives, #name)();
+  BoolColumn get isWhite => boolean().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {uuid};
@@ -61,6 +66,25 @@ class Moves extends Table {
 
   @override
   Set<Column<Object>> get primaryKey => {fromFen, move};
+}
+
+class GameRepertoireComparisons extends Table {
+  TextColumn get game => text()();
+  TextColumn get fromFen => text()();
+  TextColumn get move => text()();
+  IntColumn get moveNumber => integer()();
+  BoolColumn get myMove => boolean()();
+  BoolColumn get deviated => boolean()();
+  BoolColumn get reviewed => boolean()();
+
+  @override
+  List<String> get customConstraints => [
+    'FOREIGN KEY (game, from_fen, move, move_number) REFERENCES game_moves (game, from_fen, move, move_number)',
+  ];
+
+
+  @override
+  Set<Column<Object>> get primaryKey => {game};
 }
 
 class GameMoves extends Table {
@@ -98,7 +122,7 @@ class Repertoires extends Table {
   TextColumn get name => text()();
 }
 
-@DriftDatabase(tables: [Games, Archives, Users, Repertoires, Positions, GamePositions, Moves, GameMoves, RepertoireMoves])
+@DriftDatabase(tables: [Games, Archives, Users, Repertoires, Positions, GamePositions, Moves, GameMoves, RepertoireMoves, GameRepertoireComparisons])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
   AppDatabase.configurable(super.e);

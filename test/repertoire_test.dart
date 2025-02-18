@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:repertoire_forge/data_access.dart';
+import 'package:repertoire_forge/data_import.dart';
 import 'package:repertoire_forge/database.dart';
 import 'package:repertoire_forge/repertoire_explorer.dart';
 
@@ -34,9 +35,9 @@ void main() {
     //arrange
     var sut = await RepertoireExplorer.create(da);
     //act
-    var repertoire = await sut.repertoire;
+    var repertoire = await sut.getOrCreateRepertoire();
     //assert
-    expect(repertoire.name, equals("Default"));
+    expect(repertoire.name, equals("White"));
   });
 
   test('add specific repertoire', () async {
@@ -52,16 +53,16 @@ void main() {
     //arrange
     var sut = await RepertoireExplorer.create(da);
     //act
-    var currentRepertoire = await sut.repertoire;
+    var currentRepertoire = await sut.getOrCreateRepertoire();
 
     //assert
-    expect(currentRepertoire.name, equals("Default"));
+    expect(currentRepertoire.name, equals("White"));
   });
 
   test('get moves', () async {
     //arrange
     var sut = await RepertoireExplorer.create(da);
-    await sut.repertoire;
+    await sut.getOrCreateRepertoire();
     await sut.addMove(initialPosition, move, secondPosition);
     //act
     var result = await sut.getMoves(initialPosition);
@@ -74,7 +75,7 @@ void main() {
     //arrange
     var expectedPgn = "1. e4 ( 1. d4 ) 1... e5 *\n";
     await da.getOrAddArchive("1");
-    var game = await da.addGame(const Game(uuid: "gameId", pgn: "", imported: true, score: 0.0, archive: "1"));
+    var game = await da.addGame(const Game(uuid: "gameId", pgn: "", reviewed: false, imported: true, score: 0.0, archive: "1"));
     var commonMove = await da.getOrAddMove(initialPosition, move, secondPosition);
     await da.addGameMove(game, commonMove, 1, true);
     var sut = await RepertoireExplorer.create(da);
@@ -100,4 +101,56 @@ void main() {
     expect(moves.any((m) => m.move == "d4"), true);
     expect(secondMove.any((m) => m.move =="e5"), true);
   });
+
+  test('delete repertoire move', () async {
+    //arrange
+    var sut = await RepertoireExplorer.create(da);
+    await sut.addMove(initialPosition, move, secondPosition);
+    //act
+    await sut.removeMove(initialPosition, move);
+    var result = await sut.getMoveStats(initialPosition, true);
+    //assert
+    expect(result.where((m) => m.repo).any((m) => m.move == move), false);
+  });
+
+  test('opponent deviated', () async {
+    //arrange
+    var archiveName = "1";
+    await da.getOrAddArchive(archiveName);
+    await da.setUser("pcaston2");
+    var di = await DataImport.create(da);
+    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 *\n', reviewed: false, imported: false, score: 0.0, archive: "1"));
+    await di.parseGame(game.uuid);
+    var sut = await RepertoireExplorer.create(da);
+    await sut.importRepertoire("1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 *\n");
+    //act
+    var comparison = await sut.getOrAddGameComparison(game.uuid);
+
+    //assert
+    expect(comparison == null, false);
+    comparison = comparison!;
+    expect(comparison.moveNumber, equals(6));
+    expect(comparison.myMove, equals(false));
+    expect(comparison.deviated, equals(true));
+  });
+
+  test('no deviation', () async {
+    //arrange
+    var archiveName = "1";
+    await da.getOrAddArchive(archiveName);
+    await da.setUser("pcaston2");
+    var di = await DataImport.create(da);
+    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 5. Nf3 d6 6. d4 *\n', reviewed: false, imported: false, score: 0.0, archive: "1"));
+    await di.parseGame(game.uuid);
+    var sut = await RepertoireExplorer.create(da);
+    await sut.importRepertoire("1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 *\n");
+    //act
+    var comparison = await sut.getOrAddGameComparison(game.uuid);
+
+    //assert
+    expect(comparison == null, false);
+    comparison = comparison!;
+    expect(comparison.deviated, equals(false));
+  });
+
 }

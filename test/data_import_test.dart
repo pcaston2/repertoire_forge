@@ -77,9 +77,10 @@ void main() async {
     //act
     await sut.parseGame(gameId);
     var importedPosition = await da.getPosition(expectedPosition);
+    var game = await da.getGame(gameId);
     //assert
     expect(importedPosition!.fen, expectedPosition);
-
+    expect(game.isWhite, equals(true));
   });
 
   test('parse game twice', () async {
