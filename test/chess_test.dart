@@ -73,4 +73,12 @@ void main() {
     //assert
     expect(pgn.makePgn(), equals(expectedPgn));
   });
+
+  test('nodes are different', () {
+    //arrange
+    var node1 = PgnChildNode<PgnNodeData>(PgnNodeData(san: "e4"));
+    var node2 = PgnChildNode<PgnNodeData>(PgnNodeData(san: "e4"));
+    //assert
+    expect(node1, isNot(equals(node2)));
+  });
 }

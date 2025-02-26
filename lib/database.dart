@@ -22,9 +22,9 @@ class Users extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get username => text()();
   @ReferenceName("white")
-  IntColumn get white_repertoire => integer().nullable().references(Repertoires, #id)();
+  IntColumn get whiteRepertoire => integer().nullable().references(Repertoires, #id)();
   @ReferenceName("black")
-  IntColumn get black_repertoire => integer().nullable().references(Repertoires, #id)();
+  IntColumn get blackRepertoire => integer().nullable().references(Repertoires, #id)();
 }
 
 class Games extends Table {
@@ -109,7 +109,7 @@ class RepertoireMoves extends Table {
   IntColumn get repertoire => integer().references(Repertoires, #id)();
 
   @override
-  Set<Column<Object>> get primaryKey => {fromFen, move};
+  Set<Column<Object>> get primaryKey => {fromFen, move, repertoire};
 
   @override
   List<String> get customConstraints => [

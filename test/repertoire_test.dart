@@ -35,7 +35,7 @@ void main() {
     //arrange
     var sut = await RepertoireExplorer.create(da);
     //act
-    var repertoire = await sut.getOrCreateRepertoire();
+    var repertoire = await sut.getOrCreateUserRepertoire();
     //assert
     expect(repertoire.name, equals("White"));
   });
@@ -53,7 +53,7 @@ void main() {
     //arrange
     var sut = await RepertoireExplorer.create(da);
     //act
-    var currentRepertoire = await sut.getOrCreateRepertoire();
+    var currentRepertoire = await sut.getOrCreateUserRepertoire();
 
     //assert
     expect(currentRepertoire.name, equals("White"));
@@ -62,7 +62,7 @@ void main() {
   test('get moves', () async {
     //arrange
     var sut = await RepertoireExplorer.create(da);
-    await sut.getOrCreateRepertoire();
+    await sut.getOrCreateUserRepertoire();
     await sut.addMove(initialPosition, move, secondPosition);
     //act
     var result = await sut.getMoves(initialPosition);

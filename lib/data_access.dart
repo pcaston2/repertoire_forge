@@ -106,12 +106,17 @@ class DataAccess {
     return await (_database.into(_database.gameMoves).insertReturning(GameMovesCompanion.insert(fromFen: move.fromFen, move: move.move, game: game.uuid, moveNumber: moveNumber, myMove: myMove)));
   }
 
-  Future<Repertoire?> getRepertoire({bool isWhite = true}) async {
-    var repertoire = (isWhite? (await user).white_repertoire : (await user).black_repertoire);
+  Future<Repertoire> getRepertoire(int repertoire) async {
+    return await (_database.select(_database.repertoires)..where((r) => r.id.equals(repertoire))).getSingle();
+  }
+
+  Future<Repertoire?> getUserRepertoire({bool isWhite = true}) async {
+    var currentUser = await user;
+    var repertoire = (isWhite? currentUser.whiteRepertoire : currentUser.blackRepertoire);
     if (repertoire == null) {
       return null;
     } else {
-      return await (_database.select(_database.repertoires)..where((r) => r.id.equals(repertoire))).getSingle();
+      return getRepertoire(repertoire);
     }
   }
 
@@ -119,32 +124,34 @@ class DataAccess {
     return await(_database.into(_database.repertoires).insertReturning(RepertoiresCompanion.insert(name: repertoireName)));
   }
 
-  setRepertoire(int repertoireId, {bool isWhite = true}) async {
+  setUserRepertoire(int repertoireId, {bool isWhite = true}) async {
     var currentUser = await user;
     await _database.update(_database.users).write((
         isWhite ?
-        currentUser.copyWith(white_repertoire: Value(repertoireId)) :
-        currentUser.copyWith(black_repertoire: Value(repertoireId))
+        currentUser.copyWith(whiteRepertoire: Value(repertoireId)) :
+        currentUser.copyWith(blackRepertoire: Value(repertoireId))
     ));
   }
 
-  Future<RepertoireMove?> getRepertoireMove(String fromFen, String move, int repertoire, {bool isWhite = true}) async {
-    var repertoire = await getOrAddRepertoire(isWhite: isWhite);
-    return await (_database.select(_database.repertoireMoves)..where((m) => Expression.and([m.fromFen.equals(fromFen),m.move.equals(move), m.repertoire.equals(repertoire!.id)]))).getSingleOrNull();
+  Future<RepertoireMove?> getRepertoireMove(String fromFen, String move, int repertoire) async {
+    return await (_database.select(_database.repertoireMoves)..where((m) => Expression.and([m.fromFen.equals(fromFen),m.move.equals(move), m.repertoire.equals(repertoire)]))).getSingleOrNull();
   }
 
-  Future<RepertoireMove> getOrAddRepertoireMove(String fromFen, String move, int repertoire, {bool isWhite = true}) async {
-    var repertoire = await getOrAddRepertoire(isWhite: isWhite);
-    var repertoireMove = await getRepertoireMove(fromFen, move, repertoire!.id);
+  Future<RepertoireMove> getOrAddRepertoireMove(String fromFen, String move, int repertoire) async {
+    var repertoireMove = await getRepertoireMove(fromFen, move, repertoire);
     if (repertoireMove != null) {
       return repertoireMove;
     } else {
-      return await _database.into(_database.repertoireMoves).insertReturning(RepertoireMovesCompanion.insert(fromFen: fromFen, move: move, repertoire: repertoire.id));
+      return addRepertoireMove(fromFen, move, repertoire);
     }
   }
 
+  Future<RepertoireMove> addRepertoireMove(String fromFen, String move, int repertoire) async {
+    return await _database.into(_database.repertoireMoves).insertReturning(RepertoireMovesCompanion.insert(fromFen: fromFen, move: move, repertoire: repertoire));
+  }
+
   Future<List<RepertoireMove>> getRepertoireMoves(String fromFen, int repertoire) async {
-    return (_database.select(_database.repertoireMoves)..where((r) => r.fromFen.equals(fromFen))).get();
+    return (_database.select(_database.repertoireMoves)..where((r) => Expression.and([r.fromFen.equals(fromFen), r.repertoire.equals(repertoire)]))).get();
   }
 
   Future<List<GameMove>> getGameMoves(String fromFen) {
@@ -170,6 +177,12 @@ class DataAccess {
   Future<void> setGameScore(String gameId, double score) async {
     var game = await getGame(gameId);
     await _database.update(_database.games).replace(game.copyWith(score: score));
+  }
+
+
+  Future<void> setGameReviewed(String gameId) async {
+    var game = await getGame(gameId);
+    await _database.update(_database.games).replace(game.copyWith(reviewed: true));
   }
 
   Future<List<MoveStat>> getMoveStats(String fen, int repertoire, bool myMove) async {
@@ -219,9 +232,6 @@ class DataAccess {
 
   Future<void> importChildren(int repertoire, chess.PgnChildNode move, chess.Position position) async {
     var currentMove = position.parseSan(move.data.san);
-    if (currentMove == null) {
-      print(move.data.san);
-    }
     var nextPosition = position.play(currentMove!);
     await getOrAddMove(ChessHelper.stripMoveClockInfoFromFEN(position.fen), move.data.san, ChessHelper.stripMoveClockInfoFromFEN(nextPosition.fen));
     await getOrAddRepertoireMove(ChessHelper.stripMoveClockInfoFromFEN(position.fen), move.data.san, repertoire);
@@ -292,16 +302,19 @@ class DataAccess {
         reviewed: false);
   }
 
-  Future<GameRepertoireComparison?> getOrAddGameComparison(int repertoire, String game) async {
+  Future<GameRepertoireComparison?> getOrCreateGameComparison(int repertoire, String game) async {
     var comparison = await getGameComparison(game);
     if (comparison != null) {
       return comparison;
     } else {
       var comparison = await generateGameComparison(repertoire, game);
-      if (comparison != null) {
-        await addOrUpdateGameComparison(comparison);
-      }
-      return comparison;
+      await transaction(() async {
+        if (comparison != null) {
+          await addOrUpdateGameComparison(comparison);
+        }
+        await setGameReviewed(game);
+        return comparison;
+      });
     }
   }
 
@@ -313,15 +326,35 @@ class DataAccess {
     return await (_database.select(_database.gameRepertoireComparisons)..where((c) => c.game.equals(game))).getSingleOrNull();
   }
 
-  Future<Repertoire> getOrAddRepertoire({bool isWhite = true}) async {
-    var repertoire = await getRepertoire(isWhite: isWhite);
+  Future<Repertoire> getOrCreateUserRepertoire({bool isWhite = true}) async {
+    var repertoire = await getUserRepertoire(isWhite: isWhite);
     repertoire ??= await createRepertoire(isWhite, (isWhite ? "White" : "Black"));
-    setRepertoire(repertoire.id, isWhite: isWhite);
+    setUserRepertoire(repertoire.id, isWhite: isWhite);
     return repertoire;
   }
 
   Future<List<Repertoire>> getRepertoires() async {
     return await (_database.select(_database.repertoires)).get();
+  }
+
+  Future<Game?> getOrAddGame(Game game) async {
+    var gameEntry = await (_database.select(_database.games)..where((g) => g.uuid.equals(game.uuid))).getSingleOrNull();
+    if (gameEntry != null) {
+      return gameEntry;
+    } else {
+      return await addGame(game);
+    }
+  }
+
+  Future<void> markAllGamesCompared() async {
+    await _database.update(_database.games).write(GamesCompanion(reviewed: Value(true)));
+  }
+
+  Future<void> compareAllGames(int whiteRepertoireId, int blackRepertoireId) async {
+    var games = await (_database.select(_database.games)..where((g) => Expression.and([g.reviewed.not(), g.imported, g.isWhite.isNotNull()]))).get();
+    for (var g in games) {
+      await getOrCreateGameComparison((g.isWhite! ? whiteRepertoireId : blackRepertoireId), g.uuid);
+    }
   }
 }
 

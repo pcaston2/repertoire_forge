@@ -32,7 +32,7 @@ class DataImport {
     await dataAccess.transaction(() async {
       var games = await client.getGamesInArchive(archiveName);
       for (var g in games) {
-        await dataAccess.addGame(g);
+        await dataAccess.getOrAddGame(g);
       }
       await dataAccess.setArchiveImported(archiveName, hash);
     });

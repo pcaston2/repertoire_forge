@@ -13,6 +13,8 @@ import 'data_access.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as path;
 
+import 'game_explorer.dart';
+
 
 late RepertoireExplorer explorer;
 late DataAccess dataAccess;
@@ -33,12 +35,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Chessground Demo',
+      title: 'Repertoire Forge',
       theme: ThemeData(
         brightness: Brightness.light,
         primaryColor: Colors.blueGrey,
       ),
-      home: const HomePage(title: 'Chessground Demo'),
+      home: const HomePage(title: 'Repertoire Forge'),
     );
   }
 }
@@ -71,13 +73,14 @@ class _HomePageState extends State<HomePage> {
   NormalMove? promotionMove;
   ValidMoves validMoves = IMap(const {});
   Side sideToMove = Side.white;
-  bool get isWhite => sideToMove == Side.white;
+  bool get isWhite => orientation == Side.white;
   PieceSet pieceSet = PieceSet.gioco;
   PieceShiftMethod pieceShiftMethod = PieceShiftMethod.either;
   DragTargetKind dragTargetKind = DragTargetKind.circle;
   bool drawMode = true;
   bool pieceAnimation = true;
   bool dragMagnify = true;
+  GameExplorer gameExplorer = GameExplorer();
   List<ChessMoveHistoryEntry> history = [];
   ISet<Shape> shapes = ISet();
   bool showBorder = false;
@@ -94,205 +97,168 @@ class _HomePageState extends State<HomePage> {
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.max,
         children: [
-          ElevatedButton(
-          child: const Text("Import PGN"),
-          onPressed: () async {
-            FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.custom, allowedExtensions: ['pgn']);
-            if (result != null) {
-              List<io.File> files = result.paths.map((p) => io.File(p!)).toList();
-              for (var file in files) {
-                _showToast("Importing from ${path.basename(file.path)}...", icon: Icons.hourglass_bottom, color: Colors.blueAccent);
-                var pgn = await file.readAsString();
-                await explorer.importRepertoire(pgn);
-                _showToast("Import from ${path.basename(file.path)} successful!", icon: Icons.check);
-              }
-            }
-          },
-        ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            child: const Text("Remove"),
+          IconButton(
+            icon: Icon(Icons.swap_vert_sharp),
             onPressed: () async {
-              if (history.isNotEmpty) {
-                var last = history.last;
-                var lastPosition = last.position;
-                var move = lastPosition.makeSan(last.move);
-                await explorer.removeMove(ChessHelper.stripMoveClockInfoFromFEN(lastPosition.fen), move.$2, isWhite: isWhite);
+              orientation = orientation.opposite;
+              var moveStats = await explorer.getMoveStats(
+                  ChessHelper.stripMoveClockInfoFromFEN(position.fen),
+                  orientation == position.turn,
+                  isWhite: isWhite);
+              var newShapes = makeMoveArrows(moveStats, position);
+              setState(() {
+                shapes = newShapes;
+              });
+            },
+            tooltip: "Rotate board",
+          ),
+          Spacer(),
+          IconButton(
+              onPressed: history.isNotEmpty ? () async {
+                position = Chess.initial;
+                var moveStats = await explorer.getMoveStats(
+                    ChessHelper.stripMoveClockInfoFromFEN(position.fen),
+                    orientation == position.turn, isWhite: isWhite);
+                var initShapes = makeMoveArrows(moveStats, position);
+                setState(() {
+                  lastMove = null;
+                  fen = position.fen;
+                  history = [];
+                  sideToMove = Side.white;
+                  validMoves = makeLegalMoves(position);
+                  promotionMove = null;
+                  shapes = initShapes;
+                });
+              } : null,
+              icon: const Icon(Icons.first_page_sharp),
+              tooltip: "Go to initial position",
+          ),
+          IconButton(
+              onPressed: history.isNotEmpty
+                  ? ()  async {
                 await undo();
               }
-            },
+                  : null,
+              icon: const Icon(Icons.chevron_left_sharp),
+              tooltip: "Go to previous move",
           ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            child: Text((addToRepertoire ? "Tracking" : "Not tracking")),
-            onPressed: () async {
-              setState(() {
-                addToRepertoire = !addToRepertoire;
-              });
-            },
+          IconButton(
+              onPressed: null,
+              icon: const Icon(Icons.chevron_right_sharp),
+              tooltip: "Go to next move",
           ),
-        ]
+          IconButton(
+              onPressed: null,
+              icon: const Icon(Icons.last_page_sharp),
+              tooltip: "Go to last move",
+          ),
+        ],
+      ),
+      Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.max,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.file_download_sharp),
+              onPressed: () async {
+                FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.custom, allowedExtensions: ['pgn']);
+                if (result != null) {
+                  List<io.File> files = result.paths.map((p) => io.File(p!)).toList();
+                  for (var file in files) {
+                    _showToast("Importing from ${path.basename(file.path)}...", icon: Icons.hourglass_bottom, color: Colors.blueAccent);
+                    var pgn = await file.readAsString();
+                    await explorer.importRepertoire(pgn, isWhite: isWhite);
+                    _showToast("Import from ${path.basename(file.path)} successful!", icon: Icons.check);
+                  }
+                }
+              },
+              tooltip: "Import PGN",
+            ),
+            IconButton(
+              icon: const Icon(Icons.file_upload_sharp),
+              onPressed: () async {
+                String? path = await FilePicker.platform.saveFile(type: FileType.custom, allowedExtensions: ['pgn']);
+                if (path != null) {
+                  var filePath = io.File(path);
+                  var repertoire = await explorer.exportRepertoire(orientation == position.turn, isWhite: isWhite);
+                  _showToast("Exporting to ${filePath.path}...", icon: Icons.hourglass_bottom, color: Colors.blueAccent);
+                  await filePath.writeAsString(repertoire);
+                  _showToast("Export to ${filePath.path} successful!", icon: Icons.check);
+                }
+              },
+              tooltip: "Export PGN",
+            ),
+            Spacer(),
+            IconButton(
+              icon: const Icon(Icons.cloud_download_sharp),
+              onPressed: () async {
+                _showToast("Downloading from Chess.com...", icon: Icons.hourglass_full, color: Colors.blueAccent);
+                var importer = await DataImport.create(dataAccess);
+                await importer.importArchives();
+                await importer.importAllGames();
+                await importer.parseAllGames();
+                _showToast("Download from Chess.com successful!", icon: Icons.check);
+              },
+              tooltip: "Download from Chess.com",
+            ),
+            Spacer(),
+            IconButton(
+              icon: const Icon(Icons.remove_sharp),
+              onPressed: () async {
+                if (history.isNotEmpty) {
+                  var last = history.last;
+                  var lastPosition = last.position;
+                  var move = lastPosition.makeSan(last.move);
+                  await explorer.removeMove(ChessHelper.stripMoveClockInfoFromFEN(lastPosition.fen), move.$2, isWhite: isWhite);
+                  await undo();
+                }
+              },
+              tooltip: "Remove from Repertoire",
+            ),
+            IconButton(
+              icon: Icon((addToRepertoire ? Icons.edit : Icons.edit_off_sharp)),
+              onPressed: () async {
+                setState(() {
+                  addToRepertoire = !addToRepertoire;
+                });
+              },
+              tooltip: "Track Repertoire",
+            ),
+          ]
       ),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.max,
         children: [
-          ElevatedButton(
-            child: const Text("Import from Chess.com"),
+          IconButton(
+            icon: Icon(Icons.check_circle),
             onPressed: () async {
-              _showToast("Importing from Chess.com...", icon: Icons.hourglass_full, color: Colors.blueAccent);
-              var importer = await DataImport.create(dataAccess);
-              await importer.importArchives();
-              await importer.importAllGames();
-              await importer.parseAllGames();
-              _showToast("Import from Chess.com successful!", icon: Icons.check);
-            },
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            child: const Text("Reset"),
-            onPressed: () async {
-              position = Chess.initial;
-              var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn);
-              var initShapes = makeMoveArrows(moveStats, position);
-              for (var m in repertoireMoves) {
-                var move = position.parseSan(m.move);
-                var squares = move!.squares.toList();
-                initShapes = initShapes.add(Arrow(
-                  color: Colors.lightGreen.withAlpha(192),
-                  orig: squares.first,
-                  dest: squares.last,
-                  scale: 0.6,
-                ));
-              }
+              await explorer.markAllGamesCompared();
               setState(() {
-                lastMove = null;
-                fen = position.fen;
-                history = [];
-                sideToMove = Side.white;
-                validMoves = makeLegalMoves(position);
-                promotionMove = null;
-                shapes = initShapes;
               });
             },
-          ),
-        ]
-      ),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.max,
-        children: [
-          ElevatedButton(
-            child: Text("Magnify drag: ${dragMagnify ? 'ON' : 'OFF'}"),
-            onPressed: () {
-              setState(() {
-                dragMagnify = !dragMagnify;
-              });
-            },
+            tooltip: "Mark all games as compared",
           ),
 
-          const SizedBox(width: 8),
-          ElevatedButton(
-            child: Text('Drag target: ${dragTargetKind.name}'),
-            onPressed: () => _showChoicesPicker<DragTargetKind>(
-              context,
-              choices: DragTargetKind.values,
-              selectedItem: dragTargetKind,
-              labelBuilder: (t) => Text(t.name),
-              onSelectedItemChanged: (DragTargetKind value) {
-                setState(() {
-                  dragTargetKind = value;
-                });
-              },
-            ),
-          ),
-        ],
-      ),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.max,
-        children: [
-          ElevatedButton(
-            child: Text('Orientation: ${orientation.name}'),
-            onPressed: () {
+          IconButton(
+            icon: Icon(Icons.rate_review_sharp),
+            onPressed: () async {
               setState(() {
-                orientation = orientation.opposite;
               });
             },
+            tooltip: "Review Game Comparisons",
           ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            child: Text("Piece animation: ${pieceAnimation ? 'ON' : 'OFF'}"),
-            onPressed: () {
+          Spacer(),
+          IconButton(
+            icon: Icon(Icons.compare_arrows_sharp),
+            onPressed: () async {
+              await explorer.compareAllGames();
               setState(() {
-                pieceAnimation = !pieceAnimation;
               });
             },
+            tooltip: "Compare all games",
           ),
-        ],
-      ),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.max,
-        children: [
-          ElevatedButton(
-            child: Text('Piece set: ${pieceSet.label}'),
-            onPressed: () => _showChoicesPicker<PieceSet>(
-              context,
-              choices: PieceSet.values,
-              selectedItem: pieceSet,
-              labelBuilder: (t) => Text(t.label),
-              onSelectedItemChanged: (PieceSet? value) {
-                setState(() {
-                  if (value != null) {
-                    pieceSet = value;
-                  }
-                });
-              },
-            ),
-          ),
-        ],
-      ),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.max,
-        children: [
-          ElevatedButton(
-            child:
-            Text('Piece Shift: ${pieceShiftMethodLabel(pieceShiftMethod)}'),
-            onPressed: () => _showChoicesPicker<PieceShiftMethod>(
-              context,
-              choices: PieceShiftMethod.values,
-              selectedItem: pieceShiftMethod,
-              labelBuilder: (t) => Text(pieceShiftMethodLabel(t)),
-              onSelectedItemChanged: (PieceShiftMethod? value) {
-                setState(() {
-                  if (value != null) {
-                    pieceShiftMethod = value;
-                  }
-                });
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            child: Text("Show border: ${showBorder ? 'ON' : 'OFF'}"),
-            onPressed: () {
-              setState(() {
-                showBorder = !showBorder;
-              });
-            },
-          ),
-        ],
-      ),
-        Center(
-            child: IconButton(
-                onPressed: history.length > 1
-                    ? ()  async {
-                        await undo();
-                      }
-                      : null,
-                icon: const Icon(Icons.chevron_left_sharp))),
+        ]),
     ];
 
     return Scaffold(
@@ -301,8 +267,85 @@ class _HomePageState extends State<HomePage> {
       ),
       drawer: Drawer(
           child: ListView(
-            children: const [
-              Text("derp."),
+            children: [
+              ExpansionTile(
+                  title: const Text("Settings"),
+                  children: [
+                    ElevatedButton(
+                      child: Text('Drag target: ${dragTargetKind.name}'),
+                      onPressed: () => _showChoicesPicker<DragTargetKind>(
+                        context,
+                        choices: DragTargetKind.values,
+                        selectedItem: dragTargetKind,
+                        labelBuilder: (t) => Text(t.name),
+                        onSelectedItemChanged: (DragTargetKind value) {
+                          setState(() {
+                            dragTargetKind = value;
+                          });
+                        },
+                      ),
+                    ),
+                    ElevatedButton(
+                      child: Text("Magnify drag: ${dragMagnify ? 'ON' : 'OFF'}"),
+                      onPressed: () {
+                        setState(() {
+                          dragMagnify = !dragMagnify;
+                        });
+                      },
+                    ),
+                    ElevatedButton(
+                      child:
+                      Text('Piece Shift: ${pieceShiftMethodLabel(pieceShiftMethod)}'),
+                      onPressed: () => _showChoicesPicker<PieceShiftMethod>(
+                        context,
+                        choices: PieceShiftMethod.values,
+                        selectedItem: pieceShiftMethod,
+                        labelBuilder: (t) => Text(pieceShiftMethodLabel(t)),
+                        onSelectedItemChanged: (PieceShiftMethod? value) {
+                          setState(() {
+                            if (value != null) {
+                              pieceShiftMethod = value;
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                    ElevatedButton(
+                      child: Text("Show border: ${showBorder ? 'ON' : 'OFF'}"),
+                      onPressed: () {
+                        setState(() {
+                          showBorder = !showBorder;
+                        });
+                      },
+                    ),
+                    ElevatedButton(
+                      child: Text('Piece set: ${pieceSet.label}'),
+                      onPressed: () => _showChoicesPicker<PieceSet>(
+                        context,
+                        choices: PieceSet.values,
+                        selectedItem: pieceSet,
+                        labelBuilder: (t) => Text(t.label),
+                        onSelectedItemChanged: (PieceSet? value) {
+                          setState(() {
+                            if (value != null) {
+                              pieceSet = value;
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      child: Text("Piece animation: ${pieceAnimation ? 'ON' : 'OFF'}"),
+                      onPressed: () {
+                        setState(() {
+                          pieceAnimation = !pieceAnimation;
+                        });
+                      },
+                    ),
+                  ]
+              ),
+
             ],
           )),
       body: Column(
@@ -361,7 +404,7 @@ class _HomePageState extends State<HomePage> {
     } else {
       position = Chess.initial;
     }
-    var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn);
+    var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn, isWhite: isWhite);
     var initShapes = makeMoveArrows(moveStats, position);
     setState(() {
             fen = position.fen;
@@ -427,7 +470,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
 
     validMoves = makeLegalMoves(position);
-    explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn).
+    explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn, isWhite: isWhite).
     then((List<MoveStat> moveStats) {
       var initShapes = makeMoveArrows(moveStats, position);
         setState(() {
@@ -486,10 +529,10 @@ class _HomePageState extends State<HomePage> {
       if (addToRepertoire) {
         await explorer.addMove(
             ChessHelper.stripMoveClockInfoFromFEN(history.last.position.fen), sanMove,
-            ChessHelper.stripMoveClockInfoFromFEN(position.fen));
+            ChessHelper.stripMoveClockInfoFromFEN(position.fen), isWhite: isWhite);
       }
       var newPosition = position.playUnchecked(move);
-      var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(newPosition.fen),orientation == newPosition.turn);
+      var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(newPosition.fen),orientation == newPosition.turn, isWhite: isWhite);
       var newShapes = makeMoveArrows(moveStats, newPosition);
       setState(() {
         shapes = newShapes;
