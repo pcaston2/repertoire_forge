@@ -44,9 +44,17 @@ class ChessDotComClient {
   Future<List<Game>> getGamesInArchive(String archiveUri) async {
     List<Game> games = [];
     var gamesJson = await getJson(archiveUri);
+    if (gamesJson["code"] == 0) {
+      return [];
+    }
     for (var g in gamesJson["games"]) {
-      games.add(Game(uuid: g["uuid"], pgn: g["pgn"],archive: archiveUri, reviewed: false, imported: false, score: 0));
+
+      games.add(Game(uuid: g["uuid"], pgn: g["pgn"],archive: archiveUri, reviewed: false, imported: false));
+
     }
     return games;
+
+    ///, opponentUser: '', oppenentRating: 0, result: '', event: '', site: '', date: DateTime.now(), round: '', white: '', black: '', currentPosition: '', timezone: '', eco: '', ecoUrl: '', utcDate: DateTime.now(), whiteElo: 0, blackElo: 0, timeControl: '', termination: '', startDate: DateTime.now(), endDate: DateTime.now(), link: '', ));
+
   }
 }

@@ -75,7 +75,7 @@ void main() {
     //arrange
     var expectedPgn = "1. e4 ( 1. d4 ) 1... e5 *\n";
     await da.getOrAddArchive("1");
-    var game = await da.addGame(const Game(uuid: "gameId", pgn: "", reviewed: false, imported: true, score: 0.0, archive: "1"));
+    var game = await da.addGame(Game(uuid: "gameId", pgn: "", reviewed: false, imported: true, archive: "1"));
     var commonMove = await da.getOrAddMove(initialPosition, move, secondPosition);
     await da.addGameMove(game, commonMove, 1, true);
     var sut = await RepertoireExplorer.create(da);
@@ -119,7 +119,7 @@ void main() {
     await da.getOrAddArchive(archiveName);
     await da.setUser("pcaston2");
     var di = await DataImport.create(da);
-    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 *\n', reviewed: false, imported: false, score: 0.0, archive: "1"));
+    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 *\n', reviewed: false, imported: false, archive: "1"));
     await di.parseGame(game.uuid);
     var sut = await RepertoireExplorer.create(da);
     await sut.importRepertoire("1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 *\n");
@@ -140,7 +140,7 @@ void main() {
     await da.getOrAddArchive(archiveName);
     await da.setUser("pcaston2");
     var di = await DataImport.create(da);
-    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 5. Nf3 d6 6. d4 *\n', reviewed: false, imported: false, score: 0.0, archive: "1"));
+    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 5. Nf3 d6 6. d4 *\n', reviewed: false, imported: false, archive: "1"));
     await di.parseGame(game.uuid);
     var sut = await RepertoireExplorer.create(da);
     await sut.importRepertoire("1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 *\n");

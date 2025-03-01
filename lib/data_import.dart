@@ -1,7 +1,10 @@
 import 'package:dartchess/dartchess.dart' hide Move;
+import 'package:drift/drift.dart';
+import 'package:intl/intl.dart';
 import 'package:repertoire_forge/chess_helper.dart';
 import 'data_access.dart';
 import 'chess_dot_com_client.dart';
+import 'database.dart' hide Position;
 
 class DataImport {
   DataAccess dataAccess;
@@ -15,33 +18,43 @@ class DataImport {
     return DataImport._create(dataAccess: dataAccess, client: client);
   }
 
-  Future<void> importArchives() async {
+  static DateTime parseDate(String date) {
+    var formatter = DateFormat('yyyy.MM.dd HH:mm:ss');
+    return formatter.parse(date);
+  }
+
+  static String prettyDate(DateTime date) {
+    var formatter = DateFormat('MMM d, ''yy, h:mm a');
+    return formatter.format(date);
+  }
+
+  Stream<Archive> importArchives() async* {
     var archives = await client.getArchives();
     for (var a in archives) {
-      await dataAccess.getOrAddArchive(a);
+      var archive = await dataAccess.getOrAddArchive(a);
+      yield archive;
     }
   }
 
   Future<void> importGamesInArchive(String archiveName) async {
     var archive = await dataAccess.getOrAddArchive(archiveName);
     var hash = await client.getArchiveHash(archiveName);
-    if (archive.imported && archive.hash == hash) {
-      return;
+    if (!archive.imported || archive.hash != hash) {
+      await dataAccess.transaction(() async {
+        var games = await client.getGamesInArchive(archiveName);
+        for (var g in games) {
+          await dataAccess.getOrAddGame(g);
+        }
+        await dataAccess.setArchiveImported(archiveName, hash);
+      });
     }
-
-    await dataAccess.transaction(() async {
-      var games = await client.getGamesInArchive(archiveName);
-      for (var g in games) {
-        await dataAccess.getOrAddGame(g);
-      }
-      await dataAccess.setArchiveImported(archiveName, hash);
-    });
   }
 
-  Future<void> importAllGames() async {
+  Stream<Archive> importGamesInAllArchives() async* {
     var archives = await dataAccess.archives;
     for (var a in archives) {
       await importGamesInArchive(a.name);
+      yield a;
     }
   }
 
@@ -55,8 +68,30 @@ class DataImport {
       var pgnGame = PgnGame.parsePgn(game.pgn);
       bool? isWhite;
       var user = (await dataAccess.user).username;
+
+      var event = pgnGame.headers["Event"];
+      var site = pgnGame.headers["Site"];
+      var round = pgnGame.headers["Round"];
       var white = pgnGame.headers["White"];
       var black = pgnGame.headers["Black"];
+      var currentPosition = pgnGame.headers["CurrentPosition"];
+      var timezone = pgnGame.headers["Timezone"];
+      var eco = pgnGame.headers["ECO"];
+      var ecoUrl = pgnGame.headers["ECOUrl"];
+      var date = pgnGame.headers["Date"];
+      var utcDate = pgnGame.headers["UTCDate"];
+      var utcTime = pgnGame.headers["UTCTime"];
+      var whiteElo = int.parse(pgnGame.headers["WhiteElo"]!);
+      var blackElo = int.parse(pgnGame.headers["BlackElo"]!);
+      var timeControl = pgnGame.headers["TimeControl"];
+      var termination = pgnGame.headers["Termination"];
+      var startTime = pgnGame.headers["StartTime"];
+      var endDate = pgnGame.headers["EndDate"];
+      var endTime = pgnGame.headers["EndTime"];
+      var link = pgnGame.headers["Link"];
+
+      var startDateTime = parseDate("$date $startTime");
+      var endDateTime = parseDate("$endDate $endTime");
       if (white == user) {
         isWhite = true;
       } else if (black == user) {
@@ -65,6 +100,9 @@ class DataImport {
       if (isWhite == null) {
         return false;
       }
+      var opponentRating = (isWhite ? blackElo : whiteElo);
+      var opponentUser = (isWhite ? black : white);
+
       var result = pgnGame.headers["Result"];
       var score = 0.0;
       if (result == "1-0") {
@@ -96,34 +134,54 @@ class DataImport {
         moveCount++;
         previousPosition = position;
       }
-      await dataAccess.setIsWhite(gameId, isWhite);
-      await dataAccess.setGameScore(gameId, score);
-      await dataAccess.setGameImported(gameId);
+      var updatedGame = game.copyWith(
+        isWhite: Value<bool?>(isWhite),
+        score: Value<double?>(score),
+        imported: true,
+        opponentUser: Value<String?>(opponentUser),
+        oppenentRating: Value<int?>(opponentRating),
+        event: Value<String?>(event),
+        site: Value<String?>(site),
+        date: Value<DateTime?>(startDateTime),
+        round: Value<String?>(round),
+        white: Value<String?>(white),
+        black: Value<String?>(black),
+        result: Value<String?>(result),
+        currentPosition: Value<String?>(currentPosition),
+        timezone: Value<String?>(timezone),
+        eco: Value<String?>(eco),
+        ecoUrl: Value<String?>(ecoUrl),
+        utcDate: Value<DateTime?>(startDateTime),
+        whiteElo: Value<int?>(whiteElo),
+        blackElo: Value<int?>(blackElo),
+        timeControl: Value<String?>(timeControl),
+        termination: Value<String?>(termination),
+        startDate: Value<DateTime?>(startDateTime),
+        endDate: Value<DateTime?>(endDateTime),
+        link: Value<String?>(link),
+      );
+      await dataAccess.setGame(updatedGame);
+      //await dataAccess.setIsWhite(gameId, isWhite);
+      //await dataAccess.setGameScore(gameId, score);
+      //await dataAccess.setGameImported(gameId);
     });
     return true;
   }
 
-  Future<int> parseAllGames() async {
+  Stream<Game> parseAllGames() async* {
     var games = await dataAccess.getGamesToImport();
-    var parseCount = 0;
     for(var game in games) {
-      var parsed = await parseGame(game.uuid);
-      if (parsed) {
-        parseCount++;
+      if (await parseGame(game.uuid)) {
+        yield game;
       }
     }
-    return parseCount;
   }
 
-  Future<int> parseGamesByArchive(String archiveName) async {
+  Stream<Game> parseGamesByArchive(String archiveName) async* {
     var games = await dataAccess.getGamesByArchiveToImport(archiveName);
-    var parseCount = 0;
     for (var game in games) {
-      var parsed = await parseGame(game.uuid);
-      if (parsed) {
-        parseCount++;
-      }
+      await parseGame(game.uuid);
+      yield game;
     }
-    return parseCount;
   }
 }

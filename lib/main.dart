@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:chessground/chessground.dart';
 import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'package:dartchess/dartchess.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:repertoire_forge/data_import.dart';
 import 'package:repertoire_forge/database.dart' as db;
 import 'package:repertoire_forge/repertoire_explorer.dart';
@@ -65,8 +64,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  Position<Chess> position = Chess.initial;
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin  {
   Side orientation = Side.white;
   String fen = kInitialBoardFEN;
   NormalMove? lastMove;
@@ -81,12 +79,11 @@ class _HomePageState extends State<HomePage> {
   bool pieceAnimation = true;
   bool dragMagnify = true;
   GameExplorer gameExplorer = GameExplorer();
-  List<ChessMoveHistoryEntry> history = [];
   ISet<Shape> shapes = ISet();
   bool showBorder = false;
   bool addToRepertoire = false;
   List<db.RepertoireMove> repertoireMoves = [];
-  FToast fToast = FToast();
+  late AnimationController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -98,34 +95,33 @@ class _HomePageState extends State<HomePage> {
         mainAxisSize: MainAxisSize.max,
         children: [
           IconButton(
-            icon: Icon(Icons.swap_vert_sharp),
+            icon: const Icon(Icons.swap_vert_sharp),
             onPressed: () async {
               orientation = orientation.opposite;
               var moveStats = await explorer.getMoveStats(
-                  ChessHelper.stripMoveClockInfoFromFEN(position.fen),
-                  orientation == position.turn,
+                  gameExplorer.fen,
+                  orientation == gameExplorer.position.turn,
                   isWhite: isWhite);
-              var newShapes = makeMoveArrows(moveStats, position);
+              var newShapes = makeMoveArrows(moveStats, gameExplorer.position);
               setState(() {
                 shapes = newShapes;
               });
             },
             tooltip: "Rotate board",
           ),
-          Spacer(),
+          const Spacer(),
           IconButton(
-              onPressed: history.isNotEmpty ? () async {
-                position = Chess.initial;
+              onPressed: !gameExplorer.isAtInitial ? () async {
+                gameExplorer.reset();
                 var moveStats = await explorer.getMoveStats(
-                    ChessHelper.stripMoveClockInfoFromFEN(position.fen),
-                    orientation == position.turn, isWhite: isWhite);
-                var initShapes = makeMoveArrows(moveStats, position);
+                    gameExplorer.fen,
+                    orientation == gameExplorer.position.turn, isWhite: isWhite);
+                var initShapes = makeMoveArrows(moveStats, gameExplorer.position);
                 setState(() {
                   lastMove = null;
-                  fen = position.fen;
-                  history = [];
+                  fen = gameExplorer.fen;
                   sideToMove = Side.white;
-                  validMoves = makeLegalMoves(position);
+                  validMoves = makeLegalMoves(gameExplorer.position);
                   promotionMove = null;
                   shapes = initShapes;
                 });
@@ -134,83 +130,119 @@ class _HomePageState extends State<HomePage> {
               tooltip: "Go to initial position",
           ),
           IconButton(
-              onPressed: history.isNotEmpty
+              onPressed: !gameExplorer.isAtInitial
                   ? ()  async {
-                await undo();
+                gameExplorer.back();
+                await refresh();
               }
-                  : null,
+              : null,
               icon: const Icon(Icons.chevron_left_sharp),
               tooltip: "Go to previous move",
           ),
           IconButton(
-              onPressed: null,
+              onPressed: gameExplorer.hasAMove
+                  ? () async {
+                  gameExplorer.forward();
+                  await refresh();
+                }
+                : null,
               icon: const Icon(Icons.chevron_right_sharp),
               tooltip: "Go to next move",
           ),
           IconButton(
-              onPressed: null,
+              onPressed: gameExplorer.hasAMove
+                ? () async {
+                gameExplorer.end();
+                await refresh();
+              }
+              : null,
               icon: const Icon(Icons.last_page_sharp),
               tooltip: "Go to last move",
           ),
+          Spacer(),
         ],
       ),
+      Divider(),
+      Text("Repertoire"),
       Row(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.max,
           children: [
+            IconButton(
+              icon: const Icon(Icons.cloud_download_sharp),
+              onPressed: () async {
+                try {
+                  showSnackbar(Icons.download, "Downloading from Chess.com");
+                  var importer = await DataImport.create(dataAccess);
+                  await for (var a in importer.importArchives()) {
+                    showSnackbar(Icons.add, "Added archive ${a.name}");
+                  }
+                  await for (var a in importer.importGamesInAllArchives()) {
+                    showSnackbar(Icons.download_done,
+                        "Imported all games in archive ${a.name}");
+                  }
+                  await for (var g in importer.parseAllGames()) {
+                    showSnackbar(Icons.data_array, "Parsed game ${g.uuid}");
+                  }
+                  showSnackbar(
+                  Icons.check_circle, "Done downloading from Chess.com");
+                }  catch (e) {
+                  showSnackbar(Icons.close, e.toString());
+                  rethrow;
+                }
+              },
+              tooltip: "Download from Chess.com",
+            ),
+            const Spacer(),
             IconButton(
               icon: const Icon(Icons.file_download_sharp),
               onPressed: () async {
                 FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: true, type: FileType.custom, allowedExtensions: ['pgn']);
                 if (result != null) {
                   List<io.File> files = result.paths.map((p) => io.File(p!)).toList();
-                  for (var file in files) {
-                    _showToast("Importing from ${path.basename(file.path)}...", icon: Icons.hourglass_bottom, color: Colors.blueAccent);
-                    var pgn = await file.readAsString();
-                    await explorer.importRepertoire(pgn, isWhite: isWhite);
-                    _showToast("Import from ${path.basename(file.path)} successful!", icon: Icons.check);
+                  try {
+                    for (var file in files) {
+                      var pgn = await file.readAsString();
+                      await explorer.importRepertoire(pgn, isWhite: isWhite);
+                      showSnackbar(Icons.download_done,
+                          "Import from ${path.basename(file.path)} done");
+                    }
+                    showSnackbar(
+                        Icons.check_circle, "Done importing repertoire");
+                  } catch (e) {
+                    showSnackbar(
+                        Icons.close, e.toString()
+                    );
                   }
                 }
               },
-              tooltip: "Import PGN",
+              tooltip: "Import ${(isWhite ? "White" : "Black")} Repertoire from PGN",
             ),
             IconButton(
               icon: const Icon(Icons.file_upload_sharp),
               onPressed: () async {
                 String? path = await FilePicker.platform.saveFile(type: FileType.custom, allowedExtensions: ['pgn']);
-                if (path != null) {
-                  var filePath = io.File(path);
-                  var repertoire = await explorer.exportRepertoire(orientation == position.turn, isWhite: isWhite);
-                  _showToast("Exporting to ${filePath.path}...", icon: Icons.hourglass_bottom, color: Colors.blueAccent);
-                  await filePath.writeAsString(repertoire);
-                  _showToast("Export to ${filePath.path} successful!", icon: Icons.check);
+                try {
+                  if (path != null) {
+                    var filePath = io.File(path);
+                    var repertoire = await explorer.exportRepertoire(orientation == gameExplorer.position.turn, isWhite: isWhite);
+                    await filePath.writeAsString(repertoire);
+                    showSnackbar(Icons.check_circle, "Export to ${filePath.path} done");
+                  }
+                } catch (e) {
+                  showSnackbar(Icons.close, e.toString());
                 }
               },
-              tooltip: "Export PGN",
+              tooltip: "Export ${(isWhite ? "White" : "Black")} Repertoire to PGN file",
             ),
-            Spacer(),
-            IconButton(
-              icon: const Icon(Icons.cloud_download_sharp),
-              onPressed: () async {
-                _showToast("Downloading from Chess.com...", icon: Icons.hourglass_full, color: Colors.blueAccent);
-                var importer = await DataImport.create(dataAccess);
-                await importer.importArchives();
-                await importer.importAllGames();
-                await importer.parseAllGames();
-                _showToast("Download from Chess.com successful!", icon: Icons.check);
-              },
-              tooltip: "Download from Chess.com",
-            ),
-            Spacer(),
+            const Spacer(),
             IconButton(
               icon: const Icon(Icons.remove_sharp),
               onPressed: () async {
-                if (history.isNotEmpty) {
-                  var last = history.last;
-                  var lastPosition = last.position;
-                  var move = lastPosition.makeSan(last.move);
-                  await explorer.removeMove(ChessHelper.stripMoveClockInfoFromFEN(lastPosition.fen), move.$2, isWhite: isWhite);
-                  await undo();
+                if (!gameExplorer.isAtInitial) {
+                  var lastMove = gameExplorer.lastMove;
+                  await refresh();
+                  await explorer.removeMove(gameExplorer.fen, lastMove, isWhite: isWhite);
                 }
               },
               tooltip: "Remove from Repertoire",
@@ -226,12 +258,14 @@ class _HomePageState extends State<HomePage> {
             ),
           ]
       ),
+      Divider(),
+      Text("Comparison"),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.max,
         children: [
           IconButton(
-            icon: Icon(Icons.check_circle),
+            icon: const Icon(Icons.check_circle),
             onPressed: () async {
               await explorer.markAllGamesCompared();
               setState(() {
@@ -241,18 +275,69 @@ class _HomePageState extends State<HomePage> {
           ),
 
           IconButton(
-            icon: Icon(Icons.rate_review_sharp),
+            icon: const Icon(Icons.rate_review_sharp),
             onPressed: () async {
+              var comparisons = await explorer.getUnreviewedComparisons();
+              showDialog(
+                  context: context,
+                  builder: (BuildContext context) {
+                    return AlertDialog(
+                      content: Container(
+                        width: double.maxFinite,
+                        child: ListView.separated(
+                          itemCount: comparisons.length,
+                          itemBuilder: (BuildContext context, int index) {
+                            return Container(
+                              height: 30,
+                              color: (comparisons[index].comparison.deviated ? (comparisons[index].comparison.myMove ? Colors.redAccent : Colors.yellowAccent) : Colors.lightGreenAccent ).shade100,
+                              child: Row(
+                                children: [
+                                  Icon(Icons.format_list_numbered),
+                                  Text(comparisons[index].comparison.moveNumber.toString()),
+                                  Icon(Icons.forward, color: (comparisons[index].game.isWhite! ? Colors.white : Colors.black)),
+                                  Text(comparisons[index].comparison.move),
+                                  Icon(Icons.flag, color: (comparisons[index].game.score == 1 ? Colors.green : comparisons[index].game.score == 0 ? Colors.red : Colors.white)),
+                                  Text("${comparisons[index].game.opponentUser!} (${comparisons[index].game.oppenentRating!})"),
+                                  Icon(Icons.watch_later),
+                                  Text("${DataImport.prettyDate(comparisons[index].game.startDate!)}"),
+                                  Spacer(),
+                                  TextButton(
+                                    onPressed: () async { 
+                                      var game = await dataAccess.getGame(comparisons[index].comparison.game);
+                                      orientation = (game.isWhite! ? Side.white : Side.black);
+                                      gameExplorer = GameExplorer.fromPgn(game.pgn);
+                                      for (int i = 0; i < comparisons[index].comparison.moveNumber; i++) {
+                                        gameExplorer.forward();
+                                      }
+                                      await refresh();
+                                      Navigator.pop(context);
+                                    }, child: Text("Review"),
+                                  )
+                                ]
+                              ),
+                            );
+                          }, separatorBuilder: (BuildContext context, int index) => const Spacer(),
+
+                        ),
+                      ),
+                    );
+                  }
+              );
               setState(() {
               });
             },
-            tooltip: "Review Game Comparisons",
+            tooltip: "Review game comparisons",
           ),
-          Spacer(),
+          const Spacer(),
           IconButton(
-            icon: Icon(Icons.compare_arrows_sharp),
+            icon: const Icon(Icons.compare_arrows_sharp),
             onPressed: () async {
-              await explorer.compareAllGames();
+              try {
+                await explorer.compareAllGames();
+                showSnackbar(Icons.check_circle, "Game comparisons done");
+              } catch (e) {
+                showSnackbar(Icons.close, e.toString());
+              }
               setState(() {
               });
             },
@@ -263,7 +348,7 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-          title: const Text('Free Play')
+          title: const Text('Repertoire Forge')
       ),
       drawer: Drawer(
           child: ListView(
@@ -377,12 +462,12 @@ class _HomePageState extends State<HomePage> {
             fen: fen,
             lastMove: lastMove,
             game: GameData(
-              playerSide: (position.turn == Side.white
+              playerSide: (gameExplorer.position.turn == Side.white
                   ? PlayerSide.white
                   : PlayerSide.black),
               validMoves: validMoves,
-              sideToMove: position.turn == Side.white ? Side.white : Side.black,
-              isCheck: position.isCheck,
+              sideToMove: gameExplorer.position.turn == Side.white ? Side.white : Side.black,
+              isCheck: gameExplorer.position.isCheck,
               promotionMove: promotionMove,
               onMove: _playMove,
               onPromotionSelection: _onPromotionSelection,
@@ -398,18 +483,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> undo() async {
-    if (history.isNotEmpty) {
-      position = history.last.position;
-    } else {
-      position = Chess.initial;
-    }
-    var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn, isWhite: isWhite);
-    var initShapes = makeMoveArrows(moveStats, position);
+  Future<void> refresh() async {
+    var moveStats = await explorer.getMoveStats(gameExplorer.fen, orientation == gameExplorer.position.turn, isWhite: isWhite);
+    var initShapes = makeMoveArrows(moveStats, gameExplorer.position);
     setState(() {
-            fen = position.fen;
-            validMoves = makeLegalMoves(position);
-            history.removeLast();
+            fen = gameExplorer.fen;
+            validMoves = makeLegalMoves(gameExplorer.position);
             shapes = initShapes;
           });
   }
@@ -469,15 +548,21 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
 
-    validMoves = makeLegalMoves(position);
-    explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(position.fen), orientation == position.turn, isWhite: isWhite).
+
+    controller = AnimationController(
+      duration: const Duration(seconds: 0),
+      value: 1,
+      vsync: this,
+    );
+
+    validMoves = makeLegalMoves(gameExplorer.position);
+    explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(gameExplorer.fen), orientation == gameExplorer.position.turn, isWhite: isWhite).
     then((List<MoveStat> moveStats) {
-      var initShapes = makeMoveArrows(moveStats, position);
+      var initShapes = makeMoveArrows(moveStats, gameExplorer.position);
         setState(() {
           shapes = initShapes;
         });
       });
-    fToast.init(context);
   }
 
   void _onPromotionSelection(Role? role) {
@@ -495,13 +580,26 @@ class _HomePageState extends State<HomePage> {
   }
 
   ISet<Shape> makeMoveArrows(List<MoveStat> moveStats, Position position) {
-    if (moveStats.isEmpty) {
-      return ISet<Shape>();
-    }
-    var max = moveStats.reduce((curr, next) => curr.count > next.count ? curr : next).count;
 
     var newShapes = ISet<Shape>();
     var threshold = 0.05;
+    bool main = true;
+    for (var m in gameExplorer.getMoves()) {
+      var move = position.parseSan(m);
+
+      var squares = move!.squares.toList();
+      newShapes = newShapes.add(Arrow(
+        color: (Colors.black54),
+        orig: squares.first,
+        dest: squares.last,
+        scale: (main ? 0.5 : 0.2),
+      ));
+      main = false;
+    }
+    if (moveStats.isEmpty) {
+      return newShapes;
+    }
+    var max = moveStats.reduce((curr, next) => curr.count > next.count ? curr : next).count;
     for (var m in moveStats) {
       if (m.count / max < threshold && !m.repo) {
         continue;
@@ -519,27 +617,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _playMove(NormalMove move, {bool? isDrop, bool? isPremove}) async {
-    var sanMove = position.makeSan(move).$2;
-    history.add(ChessMoveHistoryEntry(position, move));
+    var currentFen = gameExplorer.fen;
+    var sanMove = gameExplorer.position.makeSan(move).$2;
     if (isPromotionPawnMove(move)) {
       setState(() {
         promotionMove = move;
       });
-    } else if (position.isLegal(move)) {
+    } else if (gameExplorer.position.isLegal(move)) {
       if (addToRepertoire) {
-        await explorer.addMove(
-            ChessHelper.stripMoveClockInfoFromFEN(history.last.position.fen), sanMove,
-            ChessHelper.stripMoveClockInfoFromFEN(position.fen), isWhite: isWhite);
+        await explorer.addMove(currentFen, sanMove, gameExplorer.fen, isWhite: isWhite);
       }
-      var newPosition = position.playUnchecked(move);
-      var moveStats = await explorer.getMoveStats(ChessHelper.stripMoveClockInfoFromFEN(newPosition.fen),orientation == newPosition.turn, isWhite: isWhite);
-      var newShapes = makeMoveArrows(moveStats, newPosition);
+      gameExplorer.move(sanMove);
+      var moveStats = await explorer.getMoveStats(gameExplorer.fen, orientation == gameExplorer.position.turn, isWhite: isWhite);
+      var newShapes = makeMoveArrows(moveStats, gameExplorer.position);
       setState(() {
         shapes = newShapes;
-        position = newPosition;
         lastMove = move;
-        fen = position.fen;
-        validMoves = makeLegalMoves(position);
+        fen = gameExplorer.fen;
+        validMoves = makeLegalMoves(gameExplorer.position);
         promotionMove = null;
       });
     }
@@ -547,44 +642,32 @@ class _HomePageState extends State<HomePage> {
 
   bool isPromotionPawnMove(NormalMove move) {
     return move.promotion == null &&
-        position.board.roleAt(move.from) == Role.pawn &&
-        ((move.to.rank == Rank.first && position.turn == Side.black) ||
-            (move.to.rank == Rank.eighth && position.turn == Side.white));
+        gameExplorer.position.board.roleAt(move.from) == Role.pawn &&
+        ((move.to.rank == Rank.first && gameExplorer.position.turn == Side.black) ||
+            (move.to.rank == Rank.eighth && gameExplorer.position.turn == Side.white));
   }
 
 
-  _showToast(String message, {IconData icon = Icons.info, Color color = Colors.greenAccent}) {
-    Widget toast = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(25.0),
-        color: color,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+  showSnackbar(IconData icon, String message) {
+    Color background = Colors.black;
+    switch (icon) {
+      case Icons.check_circle:
+        background = Colors.green;
+      case Icons.close:
+        background = Colors.red;
+    }
+    var snackbar = SnackBar(
+        content: Row(
         children: [
-          Icon(icon),
-          const SizedBox(
-            width: 12.0,
-          ),
-          Text(message),
-        ],
-      ),
-    );
-
-
-    fToast.showToast(
-      child: toast,
-      gravity: ToastGravity.BOTTOM,
-      toastDuration: const Duration(seconds: 2),
-    );
+        Icon(icon, color: Colors.blueAccent),
+        Text(message)
+        ]),
+        animation: controller,
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: background);
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(snackbar);
   }
 
-}
 
-class ChessMoveHistoryEntry {
-  late Position<Chess> position;
-  late NormalMove move;
-
-  ChessMoveHistoryEntry(this.position, this.move);
 }

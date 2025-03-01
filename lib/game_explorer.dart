@@ -1,5 +1,4 @@
 import 'package:dartchess/dartchess.dart';
-import 'package:path/path.dart';
 
 import 'chess_helper.dart';
 
@@ -11,11 +10,13 @@ class GameExplorer {
     _initialPosition = Position.initialPosition(Rule.chess);
   }
 
-  String get fen => ChessHelper.stripMoveClockInfoFromFEN(_currentPosition.fen);
+  String get fen => ChessHelper.stripMoveClockInfoFromFEN(position.fen);
 
   bool get hasAMove => getMoves().isNotEmpty;
+  bool get isAtInitial => _moveList.isEmpty;
+  String get lastMove => _moveList.last;
 
-  Position get _currentPosition {
+  Position get position {
     var currentNode = _root;
     var currentPosition = _initialPosition;
     for (var s in _moveList) {
@@ -66,5 +67,17 @@ class GameExplorer {
 
   reset() {
     _moveList.clear();
+  }
+
+  void end() {
+    while (hasAMove) {
+      forward();
+    }
+  }
+
+  GameExplorer.fromPgn(String pgn) {
+    var pgnGame = PgnGame.parsePgn(pgn);
+    _initialPosition = PgnGame.startingPosition(pgnGame.headers);
+    _root = pgnGame.moves;
   }
 }

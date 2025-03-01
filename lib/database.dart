@@ -32,9 +32,32 @@ class Games extends Table {
   TextColumn get pgn => text()();
   BoolColumn get imported => boolean()();
   BoolColumn get reviewed => boolean()();
-  RealColumn get score => real()();
+  RealColumn get score => real().nullable()();
   TextColumn get archive => text().references(Archives, #name)();
   BoolColumn get isWhite => boolean().nullable()();
+  TextColumn get opponentUser => text().nullable()();
+  IntColumn get oppenentRating => integer().nullable()();
+
+  TextColumn get event => text().nullable()();
+  TextColumn get site => text().nullable()();
+  DateTimeColumn get date => dateTime().nullable()();
+  TextColumn get round => text().nullable()();
+  TextColumn get white => text().nullable()();
+  TextColumn get black => text().nullable()();
+  TextColumn get result => text().nullable()();
+  TextColumn get currentPosition => text().nullable()();
+  TextColumn get timezone => text().nullable()();
+  TextColumn get eco => text().nullable()();
+  TextColumn get ecoUrl => text().nullable()();
+  DateTimeColumn get utcDate => dateTime().nullable()();
+  IntColumn get whiteElo => integer().nullable()();
+  IntColumn get blackElo => integer().nullable()();
+  TextColumn get timeControl => text().nullable()();
+  TextColumn get termination => text().nullable()();
+  DateTimeColumn get startDate => dateTime().nullable()();
+  DateTimeColumn get endDate => dateTime().nullable()();
+  TextColumn get link => text().nullable()();
+
 
   @override
   Set<Column<Object>> get primaryKey => {uuid};

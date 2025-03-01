@@ -1,5 +1,6 @@
 import 'package:dartchess/dartchess.dart' as chess;
 import 'package:drift/drift.dart';
+import 'package:repertoire_forge/repertoire_explorer.dart';
 
 
 import 'chess_helper.dart';
@@ -176,7 +177,12 @@ class DataAccess {
 
   Future<void> setGameScore(String gameId, double score) async {
     var game = await getGame(gameId);
-    await _database.update(_database.games).replace(game.copyWith(score: score));
+    await _database.update(_database.games).replace(game.copyWith(score: Value<double?>(score)));
+  }
+
+
+  Future<void> setGame(Game updatedGame) async {
+    await _database.update(_database.games).replace(updatedGame);
   }
 
 
@@ -313,8 +319,8 @@ class DataAccess {
           await addOrUpdateGameComparison(comparison);
         }
         await setGameReviewed(game);
-        return comparison;
       });
+      return comparison;
     }
   }
 
@@ -356,6 +362,15 @@ class DataAccess {
       await getOrCreateGameComparison((g.isWhite! ? whiteRepertoireId : blackRepertoireId), g.uuid);
     }
   }
+
+  Future<List<ComparisonAndGameEntry>> getUnreviewedComparisons() async {
+    var query = await (_database
+        .select(_database.gameRepertoireComparisons)
+        .join([innerJoin(_database.games, _database.games.uuid.equalsExp(_database.gameRepertoireComparisons.game))])
+      ..where(_database.gameRepertoireComparisons.reviewed.not()));
+    return query.map((row) => ComparisonAndGameEntry(row.readTable(_database.games), row.readTable(_database.gameRepertoireComparisons))).get();
+  }
+
 }
 
 class MoveStat {

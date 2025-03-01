@@ -48,7 +48,7 @@ void main() async {
   test('import games for an archive', () async {
     //arrange
     var sut = await DataImport.create(da);
-    await sut.importArchives();
+    await for (var _ in sut.importArchives()) {};
     var archives = await sut.dataAccess.archives;
     //act
     await sut.importGamesInArchive(archives.first.name);
@@ -62,7 +62,7 @@ void main() async {
     var sut = await DataImport.create(da);
     await sut.importArchives();
     //act
-    await sut.importAllGames();
+    await sut.importGamesInAllArchives();
     var game = await da.getGame(latestGameId);
     //assert
     expect(game.uuid,equals(latestGameId));
@@ -98,7 +98,7 @@ void main() async {
     //arrange
     var sut = await DataImport.create(da);
     await sut.importArchives();
-    await sut.importAllGames();
+    await sut.importGamesInAllArchives();
     //act
     await sut.parseGamesByArchive(archiveName);
     //assert
@@ -108,9 +108,22 @@ void main() async {
       //arrange
       var sut = await DataImport.create(da);
       await sut.importArchives();
-      await sut.importAllGames();
+      await sut.importGamesInAllArchives();
       //act
       await sut.parseAllGames();
       //assert
     }, skip: true);
+
+  test('should parse a date and time', () async {
+    //arrange
+    var dateTimeString = '2024.07.21 18:28:44';
+    //act
+    var dateTime = DataImport.parseDate(dateTimeString);
+    //assert
+    expect(dateTime.day, equals(21));
+    expect(dateTime.month, equals(7));
+    expect(dateTime.year, equals(2024));
+    expect(dateTime.hour, equals(18));
+    expect(dateTime.minute,equals(28));
+  });
 }

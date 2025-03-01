@@ -32,4 +32,14 @@ void main() {
     //assert
     expect(fen, equals("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -"));
   });
+
+  test('load from pgn', () async {
+    //arrange
+    var sut = GameExplorer.fromPgn("1. e4 ( 1. d4 ) *\n");
+    //act
+    var moves = sut.getMoves();
+    //assert
+    expect(moves, contains("e4"));
+    expect(moves, contains("d4"));
+  });
 }
