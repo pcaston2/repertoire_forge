@@ -5,11 +5,11 @@ import 'database.dart';
 class RepertoireExplorer {
   DataAccess dataAccess;
 
-  RepertoireExplorer._create({required this.dataAccess});
+  RepertoireExplorer({required this.dataAccess});
 
 
   static Future<RepertoireExplorer> create(DataAccess dataAccess) async {
-    return RepertoireExplorer._create(dataAccess: dataAccess);
+    return RepertoireExplorer(dataAccess: dataAccess);
   }
 
   Future<Repertoire?> repertoire({bool isWhite = true}) async {
@@ -78,14 +78,29 @@ class RepertoireExplorer {
     await dataAccess.markAllGamesCompared();
   }
 
-  Future<void> compareAllGames() async {
+  Stream<GameRepertoireComparison?> compareAllGames() async* {
     var whiteRepertoire = await getOrCreateUserRepertoire(isWhite: true);
     var blackRepertoire = await getOrCreateUserRepertoire(isWhite: false);
-    await dataAccess.compareAllGames(whiteRepertoire.id, blackRepertoire.id);
+    await for(var c in dataAccess.compareAllGames(whiteRepertoire.id, blackRepertoire.id)) {
+      yield c;
+    }
   }
 
   Future<List<ComparisonAndGameEntry>> getUnreviewedComparisons() async {
     return await dataAccess.getUnreviewedComparisons();
+  }
+
+  Future<void> markAllComparisonsReviewed() async {
+    return await dataAccess.markAllComparisonsReviewed();
+  }
+
+  Future<List<RecommendedReview>> getRecommendedReviews() async {
+    return await dataAccess.getRecommendedReviews();
+  }
+
+  Future<List<WeightedPath>> getReviewPaths({bool isWhite = true}) async {
+    var currentRepository  = await getOrCreateUserRepertoire(isWhite: isWhite);
+    return await dataAccess.getReviewPaths(currentRepository.id, isWhite);
   }
 
 
@@ -95,4 +110,13 @@ class ComparisonAndGameEntry {
   ComparisonAndGameEntry(this.game, this.comparison);
   final Game game;
   final GameRepertoireComparison comparison;
+}
+
+class RecommendedReview {
+  final String fen;
+  final double score;
+  final int occurrences;
+  final int age;
+
+  RecommendedReview(this.fen, this.score, this.occurrences, this.age);
 }

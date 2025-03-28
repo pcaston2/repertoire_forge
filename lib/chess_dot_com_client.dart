@@ -48,9 +48,7 @@ class ChessDotComClient {
       return [];
     }
     for (var g in gamesJson["games"]) {
-
       games.add(Game(uuid: g["uuid"], pgn: g["pgn"],archive: archiveUri, reviewed: false, imported: false));
-
     }
     return games;
 

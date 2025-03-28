@@ -18,6 +18,18 @@ void main() {
   String alternatePosition = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3";
   String blacksMove = "e5";
   String blacksPosition = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6";
+  String sampleRepertoire = """
+1.e4 e5 2.Nc3 Nf6 3.f4 d5 4.fxe5 Nxe4 5.
+Qf3 Nxc3 6.bxc3 Be7 
+    ( 6...c5 7.Qg3 Nc6 8.Nf3 Be6 9.Bb5 a6 10.
+    Bxc6+ bxc6 11.Ng5 h6 12.Nxe6 fxe6 13.Qg6+ Kd7 14.O-O )
+    ( 6...Nc6 7.d4 Be6 
+        ( 7...Be7 8.Bd3 O-O 9.Ne2 Bg5 10.O-O )
+    8.Rb1 )
+7.d4 O-O 8.Bd3 Be6  
+    ( 8...c5 9.Ne2 c4 10.Bf5 Bxf5 11.Qxf5 Qd7 12.g4 )
+9.Ne2 Nc6 10.Nf4 *
+""";
 
   setUp(() {
     database = AppDatabase.configurable(DatabaseConnection(
@@ -75,7 +87,7 @@ void main() {
     //arrange
     var expectedPgn = "1. e4 ( 1. d4 ) 1... e5 *\n";
     await da.getOrAddArchive("1");
-    var game = await da.addGame(Game(uuid: "gameId", pgn: "", reviewed: false, imported: true, archive: "1"));
+    var game = await da.addGame(const Game(uuid: "gameId", pgn: "", reviewed: false, imported: true, archive: "1"));
     var commonMove = await da.getOrAddMove(initialPosition, move, secondPosition);
     await da.addGameMove(game, commonMove, 1, true);
     var sut = await RepertoireExplorer.create(da);
@@ -119,7 +131,7 @@ void main() {
     await da.getOrAddArchive(archiveName);
     await da.setUser("pcaston2");
     var di = await DataImport.create(da);
-    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 *\n', reviewed: false, imported: false, archive: "1"));
+    var game = await da.addGame(const Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 *\n', reviewed: false, imported: false, archive: "1"));
     await di.parseGame(game.uuid);
     var sut = await RepertoireExplorer.create(da);
     await sut.importRepertoire("1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 *\n");
@@ -140,7 +152,7 @@ void main() {
     await da.getOrAddArchive(archiveName);
     await da.setUser("pcaston2");
     var di = await DataImport.create(da);
-    var game = await da.addGame(Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 5. Nf3 d6 6. d4 *\n', reviewed: false, imported: false, archive: "1"));
+    var game = await da.addGame(const Game(uuid: "1", pgn: '[White "pcaston2"]\n[Black "?"]\n[Result "1-0"]\n\n1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 5. Nf3 d6 6. d4 *\n', reviewed: false, imported: false, archive: "1"));
     await di.parseGame(game.uuid);
     var sut = await RepertoireExplorer.create(da);
     await sut.importRepertoire("1. e4 e5 2. Nc3 Nf6 3. f4 exf4 4. e5 Ng8 *\n");
@@ -151,6 +163,19 @@ void main() {
     expect(comparison == null, false);
     comparison = comparison!;
     expect(comparison.deviated, equals(false));
+  });
+
+  test('generate review games', () async {
+    //arrange
+    var archiveName = "1";
+    await da.getOrAddArchive(archiveName);
+    await da.setUser("pcaston2");
+    var sut = await RepertoireExplorer.create(da);
+    await sut.importRepertoire(sampleRepertoire);
+    //act
+    var paths = await sut.getReviewPaths(isWhite: true);
+    //assert
+    expect(paths, contains("1. e4 e5 2. Nc3 Nf6 3. f4 d5 4. fxe5 Nxe4 5. Qf3 Nxc3 6. bxc3 Be7 7. d4 O-O 8. Bd3 Be6 9. Ne2 Nc6 10. Nf4 *"));
   });
 
 }

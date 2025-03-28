@@ -10,9 +10,14 @@ class DataAccess {
   final AppDatabase _database;
   DataAccess(this._database);
 
+  bool hasValidUser = false;
+
   setUser(String username) async {
     var existingUser = await user;
     await _database.update(_database.users).write(existingUser.copyWith(username: username));
+    if (username.isNotEmpty) {
+      hasValidUser = true;
+    }
   }
 
   Future<T> transaction<T>(Future<T> Function() action,
@@ -22,11 +27,22 @@ class DataAccess {
 
   Future<User> get user async {
     var user = await _database.select(_database.users).getSingleOrNull();
-    if (user == null) {
-      return await _database.into(_database.users).insertReturning(UsersCompanion.insert(username: ""));
-    } else {
-      return user;
+    user ??= await _database.into(_database.users).insertReturning(UsersCompanion.insert(username: ""));
+    if (user.username.isNotEmpty) {
+      hasValidUser = true;
     }
+    return user;
+  }
+
+  Future<bool> get hasUserProfile async {
+    var user = await _database.select(_database.users).getSingleOrNull();
+    var result = user != null;
+    if (result) {
+      if (user.username.isNotEmpty) {
+        hasValidUser = true;
+      }
+    }
+    return result;
   }
 
   Future<List<Archive>> get archives async {
@@ -44,6 +60,14 @@ class DataAccess {
     } else {
       return await _database.into(_database.archives).insertReturning(ArchivesCompanion.insert(user: (await user).id, name: archiveName, hash: "", imported: false));
     }
+  }
+
+  Future<int> getUnimportedGameCount() async {
+    var count = countAll(filter: _database.games.imported.not());
+    var total = await (_database.selectOnly(_database.games)..addColumns([count]))
+        .map((row) => row.read(count))
+        .getSingle();
+    return total ?? 0;
   }
 
   Future<Game> addGame(Game game) async {
@@ -210,7 +234,7 @@ class DataAccess {
       repoMoves.removeWhere((r) => r.move == move);
     }
     for (var r in repoMoves) {
-      moveStats.add(MoveStat(r.move, 0, 1, true));
+      moveStats.add(MoveStat(r.move, 0, 0.5, true));
     }
     return moveStats;
   }
@@ -353,13 +377,37 @@ class DataAccess {
   }
 
   Future<void> markAllGamesCompared() async {
-    await _database.update(_database.games).write(GamesCompanion(reviewed: Value(true)));
+    await _database.update(_database.games).write(const GamesCompanion(reviewed: Value(true)));
   }
 
-  Future<void> compareAllGames(int whiteRepertoireId, int blackRepertoireId) async {
-    var games = await (_database.select(_database.games)..where((g) => Expression.and([g.reviewed.not(), g.imported, g.isWhite.isNotNull()]))).get();
+  Future<void> markAllComparisonsReviewed() async {
+    await _database.update(_database.gameRepertoireComparisons).write(const GameRepertoireComparisonsCompanion(reviewed: Value(true)));
+  }
+
+  Future<List<Game>> getUncomparedGames() async {
+    return await (_database.select(_database.games)..where((g) => Expression.and([g.reviewed.not(), g.imported, g.isWhite.isNotNull()]))).get();
+  }
+
+  Future<int> getUncomparedGamesCount() async {
+    var count = countAll(filter: Expression.and([_database.games.reviewed.not(),_database.games.imported, _database.games.isWhite.isNotNull()]));
+    var total = await (_database.selectOnly(_database.games)..addColumns([count]))
+        .map((row) => row.read(count))
+        .getSingle();
+    return total ?? 0;
+  }
+
+  Future<int> getUnreviewedGamesCount() async {
+    var count = countAll(filter: Expression.and([_database.gameRepertoireComparisons.reviewed.not()]));
+    var total = await (_database.selectOnly(_database.gameRepertoireComparisons)..addColumns([count]))
+        .map((row) => row.read(count))
+        .getSingle();
+    return total ?? 0;
+  }
+
+  Stream<GameRepertoireComparison?> compareAllGames(int whiteRepertoireId, int blackRepertoireId) async* {
+    var games = await getUncomparedGames();
     for (var g in games) {
-      await getOrCreateGameComparison((g.isWhite! ? whiteRepertoireId : blackRepertoireId), g.uuid);
+      yield await getOrCreateGameComparison((g.isWhite! ? whiteRepertoireId : blackRepertoireId), g.uuid);
     }
   }
 
@@ -367,10 +415,80 @@ class DataAccess {
     var query = await (_database
         .select(_database.gameRepertoireComparisons)
         .join([innerJoin(_database.games, _database.games.uuid.equalsExp(_database.gameRepertoireComparisons.game))])
-      ..where(_database.gameRepertoireComparisons.reviewed.not()));
+      ..where(_database.gameRepertoireComparisons.reviewed.not()))..orderBy([OrderingTerm.desc(_database.games.startDate)]);
     return query.map((row) => ComparisonAndGameEntry(row.readTable(_database.games), row.readTable(_database.gameRepertoireComparisons))).get();
   }
 
+  Future<List<RecommendedReview>> getRecommendedReviews({String? fen}) async {
+    var query = "SELECT\n"
+        "from_fen fen,\n"
+        "100.0 /((unixepoch()-MAX(g.start_date))/(60 * 60 * 24.0)+ 5) * COUNT(*)/(COUNT(*)+ 5.0) score,\n"
+        "COUNT(*) occurrence,\n"
+        "ROUND((unixepoch()-MAX(g.start_date))/(60 * 60 * 24.0)) age\n"
+        "FROM\n"
+        "game_repertoire_comparisons grc\n"
+        "INNER JOIN games g\n"
+        "ON\n"
+        "(grc.game = g.uuid)\n"
+        "WHERE\n"
+        "my_move = 1\n"
+        "AND deviated = 1\n"
+        +
+        (fen == null ? "" : "AND fen = '${fen}'\n")
+        +
+        "GROUP BY\n"
+        "from_fen\n"
+        "ORDER BY\n"
+        "score DESC\n";
+    var recommendations = await _database.customSelect(query).get();
+    return recommendations.map((row) =>
+        RecommendedReview(
+            row.read<String>('fen'),
+            row.read<double>('score'),
+            row.read<int>('occurrence'),
+            row.read<int>('age'))
+    ).toList();
+  }
+
+  Future<List<WeightedPath>> getReviewPaths(int repertoireId, bool myMove) async {
+    var moves = await getRepositoryChildren(repertoireId, ChessHelper.stripMoveClockInfoFromFEN(chess.Chess.initial.fen), myMove);
+    var root = chess.PgnNode();
+    root.children.addAll(moves);
+    var position = chess.Position.initialPosition(chess.Rule.chess);
+    var paths = await splitPathsFromGame(root, position);
+    return paths;
+  }
+
+  Future<List<WeightedPath>> splitPathsFromGame(chess.PgnNode current, chess.Position position, {int ply = 0, String root = "", double score = 0}) async {
+    if (current.children.isEmpty) {
+      return [WeightedPath(path: root, score: score)];
+    }
+    var moveMessage = "";
+    var showMoveNumber = (ply % 2 == 0);
+    if (showMoveNumber) {
+      int moveIndex = (ply / 2).round()+1;
+      moveMessage = "$moveIndex. ";
+    }
+    var results = <WeightedPath>[];
+    for (var c in current.children) {
+      var move = position.parseSan(c.data.san);
+      var newPosition = position.play(move!);
+      var additionalScore = 0.0;
+
+      var review = (await getRecommendedReviews(fen: ChessHelper.stripMoveClockInfoFromFEN(position.fen))).singleOrNull;
+      if (review != null) {
+        additionalScore += review.score;
+      }
+      results.addAll(await splitPathsFromGame(c, newPosition, ply: ply+1, root: "$root$moveMessage${c.data.san} ", score: score + additionalScore));
+    }
+    return results;
+  }
+}
+
+class WeightedPath {
+  String path = "";
+  double score = 0;
+  WeightedPath({required this.path, required this.score});
 }
 
 class MoveStat {

@@ -5,10 +5,12 @@ import 'package:repertoire_forge/chess_helper.dart';
 import 'data_access.dart';
 import 'chess_dot_com_client.dart';
 import 'database.dart' hide Position;
+import 'eco_codes.dart';
 
 class DataImport {
   DataAccess dataAccess;
   ChessDotComClient client;
+  EcoCodes codes = EcoCodes();
 
   DataImport._create({required this.dataAccess, required this.client});
 
@@ -23,17 +25,26 @@ class DataImport {
     return formatter.parse(date);
   }
 
+  Future<int> getPendingImportGameCount() async {
+    await for(var _ in importArchives());
+    var archives = await dataAccess.archives;
+    for (var a in archives) {
+      await importGamesInArchive(a.name);
+    }
+    return await dataAccess.getUnimportedGameCount();
+  }
+
   static String prettyDate(DateTime date) {
-    var formatter = DateFormat('MMM d, ''yy, h:mm a');
+    var formatter = DateFormat("MMM. d, ''yy, h:mm a");
     return formatter.format(date);
   }
 
   Stream<Archive> importArchives() async* {
-    var archives = await client.getArchives();
-    for (var a in archives) {
-      var archive = await dataAccess.getOrAddArchive(a);
-      yield archive;
-    }
+      var archives = await client.getArchives();
+      for (var a in archives) {
+        var archive = await dataAccess.getOrAddArchive(a);
+        yield archive;
+      }
   }
 
   Future<void> importGamesInArchive(String archiveName) async {
@@ -79,8 +90,6 @@ class DataImport {
       var eco = pgnGame.headers["ECO"];
       var ecoUrl = pgnGame.headers["ECOUrl"];
       var date = pgnGame.headers["Date"];
-      var utcDate = pgnGame.headers["UTCDate"];
-      var utcTime = pgnGame.headers["UTCTime"];
       var whiteElo = int.parse(pgnGame.headers["WhiteElo"]!);
       var blackElo = int.parse(pgnGame.headers["BlackElo"]!);
       var timeControl = pgnGame.headers["TimeControl"];
@@ -115,6 +124,7 @@ class DataImport {
         return false;
       }
       Position chessPosition = PgnGame.startingPosition(pgnGame.headers);
+      var openingName = "Irregular opening";
       var initialFen = chessPosition.fen;
       var initialPosition = await dataAccess.getOrAddPosition(ChessHelper.stripMoveClockInfoFromFEN(initialFen));
       await dataAccess.addGamePosition(game, initialPosition, 0, isWhite);
@@ -127,6 +137,10 @@ class DataImport {
         var move = chessPosition.parseSan(moveNode.san)!;
         chessPosition = chessPosition.play(move);
         var fen = chessPosition.fen;
+        var ecoCode = codes.getFromFen(ChessHelper.stripMoveClockInfoFromFEN(fen));
+        if (ecoCode != null) {
+          openingName = ecoCode.name;
+        }
         var position = await dataAccess.getOrAddPosition(ChessHelper.stripMoveClockInfoFromFEN(fen));
         await dataAccess.addGamePosition(game, position, moveCount, !myMove);
         var moveEntry = await dataAccess.getOrAddMove(previousPosition.fen, moveNode.san, position.fen);
@@ -159,11 +173,9 @@ class DataImport {
         startDate: Value<DateTime?>(startDateTime),
         endDate: Value<DateTime?>(endDateTime),
         link: Value<String?>(link),
+        openingName: Value<String?>(openingName),
       );
       await dataAccess.setGame(updatedGame);
-      //await dataAccess.setIsWhite(gameId, isWhite);
-      //await dataAccess.setGameScore(gameId, score);
-      //await dataAccess.setGameImported(gameId);
     });
     return true;
   }

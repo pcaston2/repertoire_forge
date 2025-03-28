@@ -37,6 +37,7 @@ class Games extends Table {
   BoolColumn get isWhite => boolean().nullable()();
   TextColumn get opponentUser => text().nullable()();
   IntColumn get oppenentRating => integer().nullable()();
+  TextColumn get openingName => text().nullable()();
 
   TextColumn get event => text().nullable()();
   TextColumn get site => text().nullable()();

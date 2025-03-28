@@ -81,4 +81,16 @@ void main() {
     //assert
     expect(node1, isNot(equals(node2)));
   });
+
+  test('should generate valid move', () {
+    //arrange
+    var fen = "r1bqk2r/pppp1ppp/2n2n2/4p3/1bB1P3/2NP4/PPP1NPPP/R1BQK2R b - - 2 5";
+    var san = "O-O";
+    var setup = Setup.parseFen(fen);
+    var sut = Chess.fromSetup(setup);
+    //act
+    var move = sut.parseSan(san);
+    //assert
+    expect(move, isNotNull);
+  });
 }

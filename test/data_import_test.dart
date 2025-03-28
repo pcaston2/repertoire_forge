@@ -23,7 +23,7 @@ void main() async {
 
   tearDown(() async {
     await database.close();
-  });
+  }) ;
 
 
   test('import archives multiple times', () async {
@@ -48,7 +48,7 @@ void main() async {
   test('import games for an archive', () async {
     //arrange
     var sut = await DataImport.create(da);
-    await for (var _ in sut.importArchives()) {};
+    await for (var _ in sut.importArchives()) {}
     var archives = await sut.dataAccess.archives;
     //act
     await sut.importGamesInArchive(archives.first.name);

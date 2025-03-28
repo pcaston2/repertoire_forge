@@ -5,9 +5,13 @@ import 'chess_helper.dart';
 class GameExplorer {
   late Position _initialPosition;
   PgnNode<PgnNodeData> _root = PgnNode<PgnNodeData>();
-  List<String> _moveList = [];
+  final List<String> _moveList = [];
   GameExplorer() {
     _initialPosition = Position.initialPosition(Rule.chess);
+  }
+
+  GameExplorer.fromFen(String fen) {
+    _initialPosition = Chess.fromSetup(Setup.parseFen(fen));
   }
 
   String get fen => ChessHelper.stripMoveClockInfoFromFEN(position.fen);
@@ -59,9 +63,21 @@ class GameExplorer {
     _moveList.removeLast();
   }
 
-  forward() {
+  String forward() {
     if (hasAMove) {
-      move(getMoves().first);
+      var firstMove = getMoves().first;
+      move(firstMove);
+      return firstMove;
+    } else {
+      return "";
+    }
+  }
+
+  String peek() {
+    if (hasAMove) {
+      return getMoves().first;
+    } else {
+      return "";
     }
   }
 
@@ -80,4 +96,5 @@ class GameExplorer {
     _initialPosition = PgnGame.startingPosition(pgnGame.headers);
     _root = pgnGame.moves;
   }
+
 }
