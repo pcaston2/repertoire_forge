@@ -15,6 +15,7 @@ import 'data_access.dart';
 import 'dart:io' as io;
 import 'package:path/path.dart' as path;
 
+import 'engine.dart';
 import 'game_explorer.dart';
 import 'opening_trainer.dart';
 
@@ -88,6 +89,7 @@ class _HomePageState extends State<HomePage>
   bool dragMagnify = true;
   GameExplorer gameExplorer = GameExplorer();
   ISet<Shape> shapes = ISet();
+  Arrow? engineMove;
   bool showBorder = false;
   bool addToRepertoire = false;
   List<db.RepertoireMove> repertoireMoves = [];
@@ -100,6 +102,7 @@ class _HomePageState extends State<HomePage>
   Task? importArchiveGamesTask;
   Task? parseGamesTask;
   Task? compareGamesTask;
+  late Engine engine;
 
   Future<void> addUserDialog() async {
     await showDialog<void>(
@@ -209,7 +212,7 @@ class _HomePageState extends State<HomePage>
               var moveStats = await explorer.getMoveStats(
                   gameExplorer.fen, orientation == gameExplorer.position.turn,
                   isWhite: isWhite);
-              var newShapes = makeMoveArrows(moveStats, gameExplorer.position);
+              var newShapes = makeMoveArrows(moveStats);
               setState(() {
                 shapes = newShapes;
               });
@@ -389,15 +392,16 @@ class _HomePageState extends State<HomePage>
               onPressed: () async {
                 var paths = await explorer.getReviewPaths(isWhite: isWhite);
                 Random r = Random();
-                paths.forEach((p) => p.score*=r.nextDouble());
+                paths.forEach((p) => p.score *= r.nextDouble());
                 paths.sort((a, b) => a.score.compareTo(b.score));
                 for (var p in paths) {
                   bool cont = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  OpeningTrainer(title: 'Training', pgn: p.path)))
-                      as bool;
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => OpeningTrainer(
+                              title: 'Training',
+                              pgn: p.path,
+                              isWhite: isWhite))) as bool;
                   if (!cont) {
                     break;
                   }
@@ -457,7 +461,6 @@ class _HomePageState extends State<HomePage>
               },
               tooltip: "Compare all games",
             ),
-
             IconButton(
               icon: const Icon(Icons.check_circle),
               onPressed: () async {
@@ -470,12 +473,12 @@ class _HomePageState extends State<HomePage>
             IconButton(
               icon: (gamesToReview == null
                   ? const Badge(
-                  label: Text("?"), child: Icon(Icons.rate_review_sharp))
+                      label: Text("?"), child: Icon(Icons.rate_review_sharp))
                   : (gamesToReview! > 0
-                  ? Badge.count(
-                  count: gamesToReview!,
-                  child: const Icon(Icons.rate_review_sharp))
-                  : const Icon(Icons.rate_review_sharp))),
+                      ? Badge.count(
+                          count: gamesToReview!,
+                          child: const Icon(Icons.rate_review_sharp))
+                      : const Icon(Icons.rate_review_sharp))),
               onPressed: () async {
                 var comparisons = await explorer.getUnreviewedComparisons();
                 showDialog(
@@ -503,7 +506,11 @@ class _HomePageState extends State<HomePage>
                                         Row(children: [
                                           Chessboard.fixed(
                                             size: 120,
-                                            orientation: (comparisons[index].game.isWhite! ? Side.white : Side.black),
+                                            orientation: (comparisons[index]
+                                                    .game
+                                                    .isWhite!
+                                                ? Side.white
+                                                : Side.black),
                                             settings: const ChessboardSettings(
                                               pieceAssets:
                                                   PieceSet.mpchessAssets,
@@ -556,7 +563,12 @@ class _HomePageState extends State<HomePage>
                                                         i++) {
                                                       gameExplorer.forward();
                                                     }
-                                                    orientation = (comparisons[index].game.isWhite! ? Side.white : Side.black);
+                                                    orientation =
+                                                        (comparisons[index]
+                                                                .game
+                                                                .isWhite!
+                                                            ? Side.white
+                                                            : Side.black);
                                                     await refresh();
                                                     Navigator.pop(context);
                                                   },
@@ -600,7 +612,7 @@ class _HomePageState extends State<HomePage>
                     context: context,
                     builder: (BuildContext context) {
                       return AlertDialog(
-                        content: Container(
+                        content: SizedBox(
                           width: double.maxFinite,
                           child: ListView.separated(
                             itemCount: recommendations.length,
@@ -649,7 +661,8 @@ class _HomePageState extends State<HomePage>
                                         onPressed: () async {
                                           gameExplorer = GameExplorer.fromFen(
                                               recommendations[index].fen);
-                                          orientation = gameExplorer.position.turn;
+                                          orientation =
+                                              gameExplorer.position.turn;
                                           await refresh();
                                           Navigator.pop(context);
                                         },
@@ -782,6 +795,7 @@ class _HomePageState extends State<HomePage>
                 })),
           Chessboard(
             size: screenWidth,
+
             settings: ChessboardSettings(
               pieceAssets: pieceSet.assets,
               border: (addToRepertoire
@@ -822,7 +836,7 @@ class _HomePageState extends State<HomePage>
               onMove: _playMove,
               onPromotionSelection: _onPromotionSelection,
             ),
-            shapes: shapes.isNotEmpty ? shapes : null,
+            shapes: shapes.isNotEmpty ? (engineMove != null ? shapes.add(engineMove!) : shapes) : (engineMove == null ? null : ISet<Shape>().add(engineMove!)),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -838,7 +852,7 @@ class _HomePageState extends State<HomePage>
     var moveStats = await explorer.getMoveStats(
         gameExplorer.fen, orientation == gameExplorer.position.turn,
         isWhite: isWhite);
-    var initShapes = makeMoveArrows(moveStats, gameExplorer.position);
+    var initShapes = makeMoveArrows(moveStats);
     setState(() {
       fen = gameExplorer.fen;
       validMoves = makeLegalMoves(gameExplorer.position);
@@ -901,6 +915,20 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
 
+    engine = Engine.create((engineInfo) {
+      var move = Move.parse(engineInfo.principalVariation.first);
+      if (move != null) {
+        engineMove = Arrow(
+            color: Colors.lightGreenAccent.withAlpha(150),
+            orig: move.squares.first,
+            dest: move.squares.last,
+            scale: 0.3);
+        setState(() {
+
+        });
+      }
+    });
+
     var appDatabase = db.AppDatabase();
     dataAccess = DataAccess(appDatabase);
     explorer = RepertoireExplorer(dataAccess: dataAccess);
@@ -917,7 +945,7 @@ class _HomePageState extends State<HomePage>
             orientation == gameExplorer.position.turn,
             isWhite: isWhite)
         .then((List<MoveStat> moveStats) {
-      var initShapes = makeMoveArrows(moveStats, gameExplorer.position);
+      var initShapes = makeMoveArrows(moveStats);
       setState(() {
         shapes = initShapes;
       });
@@ -938,13 +966,14 @@ class _HomePageState extends State<HomePage>
     });
   }
 
-  ISet<Shape> makeMoveArrows(List<MoveStat> moveStats, Position position) {
+  ISet<Shape> makeMoveArrows(List<MoveStat> moveStats) {
+    var position = gameExplorer.position;
     var newShapes = ISet<Shape>();
     var threshold = 0.05;
     bool main = true;
+    engine.setPosition(ChessHelper.addFakeMoveClockInfoToFen(position.fen));
     for (var m in gameExplorer.getMoves()) {
       var move = position.parseSan(m);
-
       var squares = move!.squares.toList();
       newShapes = newShapes.add(Arrow(
         color: (Colors.black54),
@@ -1011,7 +1040,7 @@ class _HomePageState extends State<HomePage>
       var moveStats = await explorer.getMoveStats(
           gameExplorer.fen, orientation == gameExplorer.position.turn,
           isWhite: isWhite);
-      var newShapes = makeMoveArrows(moveStats, gameExplorer.position);
+      var newShapes = makeMoveArrows(moveStats);
       setState(() {
         shapes = newShapes;
         lastMove = move;

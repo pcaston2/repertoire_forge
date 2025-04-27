@@ -7,4 +7,8 @@ class ChessHelper {
     strippedFen = strippedFen.substring(0, lastSpace);
     return strippedFen;
   }
+
+  static String addFakeMoveClockInfoToFen(String fen) {
+    return "$fen 0 1";
+  }
 }

@@ -7,23 +7,24 @@ import 'package:fast_immutable_collections/fast_immutable_collections.dart';
 import 'game_explorer.dart';
 
 class OpeningTrainer extends StatefulWidget {
-  const OpeningTrainer({super.key, required this.title, required this.pgn});
+  const OpeningTrainer({super.key, required this.title, required this.pgn, required this.isWhite});
 
   final String title;
   final String pgn;
+  final bool isWhite;
 
   @override
-  State<OpeningTrainer> createState() => _OpeningTrainerState(pgn);
+  State<OpeningTrainer> createState() => _OpeningTrainerState(pgn, isWhite);
 }
 
 class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProviderStateMixin  {
-  Side orientation = Side.white;
+  late Side orientation;
   String fen = kInitialBoardFEN;
   NormalMove? lastMove;
   NormalMove? promotionMove;
   ValidMoves validMoves = IMap(const {});
-  Side sideToMove = Side.white;
-  bool get isWhite => orientation == Side.white;
+  late Side sideToMove;
+  late bool isWhite;
   PieceSet pieceSet = PieceSet.gioco;
   PieceShiftMethod pieceShiftMethod = PieceShiftMethod.either;
   DragTargetKind dragTargetKind = DragTargetKind.circle;
@@ -37,7 +38,7 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
   late AnimationController controller;
   late String pgn;
 
-  _OpeningTrainerState(this.pgn);
+  _OpeningTrainerState(this.pgn, this.isWhite);
 
   @override
   Widget build(BuildContext context) {
@@ -47,9 +48,17 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.max,
         children: [
-          Spacer(),
+          IconButton(
+            icon: const Icon(Icons.swap_vert_sharp),
+            onPressed: () async {
+              orientation = orientation.opposite;
+            },
+            tooltip: "Rotate board",
+          ),
+          const Spacer(),
           IconButton(
             onPressed: !gameExplorer.isAtInitial ? () async {
+              shapes = ISet<Shape>();
               gameExplorer.reset();
               path.reset();
               lastMove = null;
@@ -61,6 +70,7 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
           IconButton(
             onPressed: !gameExplorer.isAtInitial
                 ? ()  async {
+              shapes = ISet<Shape>();
               gameExplorer.back();
               path.back();
               lastMove = null;
@@ -73,6 +83,7 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
           IconButton(
             onPressed: gameExplorer.hasAMove
                 ? () async {
+              shapes = ISet<Shape>();
               gameExplorer.forward();
               path.forward();
               lastMove = null;
@@ -82,13 +93,33 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
             icon: const Icon(Icons.chevron_right_sharp),
             tooltip: "Go to next move",
           ),
+          const Spacer(),
           IconButton(
             onPressed: () {
-             var move = path.position.parseSan(path.peek());
-             var hintTile = move!.squares.first;
+              var move = path.position.parseSan(path.peek());
+              var hintTile = move!.squares.first;
+              Circle highlight = Circle(color: Colors.blueAccent, orig: hintTile);
+              ISet<Shape> newShapes = ISet<Shape>();
+              newShapes = newShapes.add(highlight);
+              setState(() {
+                shapes = newShapes;
+              });
             },
-            icon: const Icon(Icons.live_help_outlined),
+            icon: const Icon(Icons.lightbulb_sharp),
             tooltip: "Hint",
+          ),
+          IconButton(
+              onPressed: () {
+                var move = path.position.parseSan(path.peek());
+                Arrow solution = Arrow(color: Colors.blueAccent, orig: move!.squares.first, dest: move.squares.last);
+                ISet<Shape> newShapes = ISet<Shape>();
+                newShapes = newShapes.add(solution);
+                setState(() {
+                  shapes = newShapes;
+                });
+              },
+              tooltip: "Solution",
+              icon: const Icon(Icons.help_sharp)
           ),
           IconButton(
             onPressed: () {
@@ -202,6 +233,7 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
         children: [
           Chessboard(
             size: screenWidth,
+            shapes: shapes,
             settings: ChessboardSettings(
               pieceAssets: pieceSet.assets,
               border: (showBorder ? const BoardBorder(color: Colors.black, width: 15) : null),
@@ -225,9 +257,9 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
             fen: fen,
             lastMove: lastMove,
             game: GameData(
-              playerSide: (path.hasAMove ? (orientation == Side.white ? PlayerSide.white : PlayerSide.black) : PlayerSide.none),
+              playerSide: (path.hasAMove ? (isWhite? PlayerSide.white : PlayerSide.black) : PlayerSide.none),
               validMoves: validMoves,
-              sideToMove: gameExplorer.position.turn == Side.white ? Side.white : Side.black,
+              sideToMove: (isWhite ? Side.white : Side.black),
               isCheck: gameExplorer.position.isCheck,
               promotionMove: promotionMove,
               onMove: _playMove,
@@ -292,6 +324,8 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
+    orientation = (isWhite ? Side.white : Side.black);
+    sideToMove = (isWhite ? Side.white : Side.black);
     path = GameExplorer.fromPgn(pgn);
     controller = AnimationController(
       duration: const Duration(seconds: 0),
@@ -300,13 +334,16 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
     );
 
     validMoves = makeLegalMoves(gameExplorer.position);
+    if (!isWhite) {
+      makeComputerMove();
+    }
   }
 
   void _onPromotionSelection(Role? role) {
     if (role == null) {
       _onPromotionCancel();
     } else if (promotionMove != null) {
-      _playMove(promotionMove!.withPromotion(role));
+
     }
   }
 
@@ -317,10 +354,17 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
   }
 
   Future<void> _playMove(NormalMove move, {bool? isDrop, bool? isPremove}) async {
-    var currentFen = gameExplorer.fen;
     var sanMove = gameExplorer.position.makeSan(move).$2;
     if (path.peek() != sanMove) {
+      var failArrow = Arrow(color: Colors.redAccent, orig: move.squares.first, dest: move.squares.last, scale: 0.5);
+      var newShapes = ISet<Shape>();
+      newShapes = newShapes.add(failArrow);
+      setState(() {
+        shapes = newShapes;
+      });
       return;
+    } else {
+      shapes = ISet<Shape>();
     }
     if (isPromotionPawnMove(move)) {
       setState(() {
@@ -336,20 +380,24 @@ class _OpeningTrainerState extends State<OpeningTrainer> with SingleTickerProvid
         promotionMove = null;
       });
       if (path.hasAMove) {
-        Future.delayed(const Duration(milliseconds: 100), () {
-          var opponentMoveSan = path.forward();
-          var opponentMove = gameExplorer.position.parseSan(opponentMoveSan)! as NormalMove;
-          gameExplorer.move(opponentMoveSan);
-          setState(() {
-            lastMove = opponentMove;
-            fen = gameExplorer.fen;
-            validMoves = makeLegalMoves(gameExplorer.position);
-            promotionMove = null;
-          });
-        });
+        makeComputerMove();
 
       }
     }
+  }
+
+  void makeComputerMove() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      var opponentMoveSan = path.forward();
+      var opponentMove = gameExplorer.position.parseSan(opponentMoveSan)! as NormalMove;
+      gameExplorer.move(opponentMoveSan);
+      setState(() {
+        lastMove = opponentMove;
+        fen = gameExplorer.fen;
+        validMoves = makeLegalMoves(gameExplorer.position);
+        promotionMove = null;
+      });
+    });
   }
 
   bool isPromotionPawnMove(NormalMove move) {
